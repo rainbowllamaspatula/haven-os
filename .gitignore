@@ -13,6 +13,10 @@ node_modules/
 # and the PUBLIC VAPID key — so a fresh clone builds without a manual step.
 !frontend/.env.development
 !frontend/.env.production
+# Carve-out: the deploy-button prompt manifest holds placeholder text only —
+# it's how the button knows WHICH secrets to ask for, never their values.
+# (Its absence cost the first published template its secret prompts, 19 Jul.)
+!.env.example
 
 # ---- Build output ----
 # Generated artefacts, rebuilt on demand.

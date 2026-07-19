@@ -1063,8 +1063,8 @@ function wordsMatch(a: string, b: string): boolean {
  * Non-resident entries matching `need`, best first, capped at SHORTLIST_MAX.
  * With a context (Haven fork): tools whose capability group has no key are
  * filtered out entirely — an unconfigured capability is simply not offered —
- * the match surface is resolved first (so "kronk" in a need still finds the
- * vacuum tools through the roster-resolved blurb), and the install's own
+ * the match surface is resolved first (so a roster vacuum's name in a need
+ * still finds the vacuum tools through the resolved blurb), and the install's own
  * names join the stopword list (the model's "Elle asks…" phrasing must not
  * skew scores toward every blurb carrying her name).
  */
