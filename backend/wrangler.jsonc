@@ -1,0 +1,137 @@
+/**
+ * For more details on how to configure Wrangler, refer to:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "vale-os-backend",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-05-31",
+	"observability": {
+		"enabled": true
+	},
+	"upload_source_maps": true,
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	/**
+	 * Environment Variables (non-secret)
+	 * https://developers.cloudflare.com/workers/wrangler/configuration/#environment-variables
+	 * The Supabase project URL is just an address, not a secret, so it lives here
+	 * in plain config. The service-role KEY is a secret and is deliberately NOT
+	 * here — it's set via `.dev.vars` (local dev) and `wrangler secret put` (prod).
+	 *
+	 * ENVIRONMENT defaults to "production" here and is overridden to "development"
+	 * in .dev.vars, so persistence only fires on the live deployment — never in the
+	 * local `wrangler dev` sandbox.
+	 *
+	 * NOTION_VERSION is the Notion API version header for the /api/projects live
+	 * read; 2025-09-03+ is required for the data-sources query endpoint. Not a
+	 * secret. The token it pairs with — NOTION_TOKEN — IS a secret and is set with
+	 * `wrangler secret put NOTION_TOKEN` (prod) / `.dev.vars` (local), never here.
+	 */
+	"vars": {
+		"SUPABASE_URL": "https://YOUR-PROJECT-REF.supabase.co",
+		"ENVIRONMENT": "production",
+		"NOTION_VERSION": "2025-09-03",
+		// The account id names the R2 S3 endpoint gallery.ts presigns reference
+		// URLs against. An identifier, not a secret (it appears in every R2 URL).
+		// The Secrets Store id for the keys circuit (fusebox-keys.ts). An
+		// identifier, not a secret (the Edit-scoped token is the credential).
+	},
+	/**
+	 * The six managed keys — Secrets Store bindings (Fuse Box v0.3, Phase 2B).
+	 * Values live in the account-level store, write-only, rotated deploy-free
+	 * through the Fuse Box keys circuit. Access is async via src/secrets.ts —
+	 * the only module allowed to call .get(). A NEW key name needs a new entry
+	 * here (and a registry row in fusebox-keys.ts) — that's the one keys
+	 * operation that still takes a deploy, by design.
+	 * Local dev: seed the LOCAL store once with scripts/seed-local-secrets.ps1
+	 * (production values are unreadable from local, per Cloudflare).
+	 */
+	"secrets_store_secrets": [
+		{ "binding": "ANTHROPIC_API_KEY", "store_id": "00000000000000000000000000000000", "secret_name": "anthropic_api_key" },
+		{ "binding": "ELEVENLABS_API_KEY", "store_id": "00000000000000000000000000000000", "secret_name": "elevenlabs_api_key" },
+		{ "binding": "GETIMG_API_KEY", "store_id": "00000000000000000000000000000000", "secret_name": "getimg_api_key" },
+		{ "binding": "HA_MCP_URL", "store_id": "00000000000000000000000000000000", "secret_name": "ha_mcp_url" },
+		{ "binding": "HA_TOKEN", "store_id": "00000000000000000000000000000000", "secret_name": "ha_token" },
+		{ "binding": "NOTION_TOKEN", "store_id": "00000000000000000000000000000000", "secret_name": "notion_token" },
+		/**
+		 * The seventh key (Haven fork): embeddings moved from the Supabase Edge
+		 * Function into the Worker. Activated 19 Jul 2026 once the key existed in
+		 * the store (Elle pasted it through the keys circuit; a binding to a
+		 * nonexistent secret is refused at deploy, hence the shipped-commented
+		 * first step). With the binding live, embedText takes the direct
+		 * OpenRouter path and the legacy embed Edge Function is retirable.
+		 */
+		{ "binding": "OPENROUTER_API_KEY", "store_id": "00000000000000000000000000000000", "secret_name": "openrouter_api_key" }
+	],
+	/**
+	 * Static assets + SPA.
+	 * run_worker_first = true: the Worker runs for every request so it can apply
+	 * the password gate, then serves the built front end (Vite's ./dist) via the
+	 * ASSETS binding for non-/api routes. Unmatched routes fall back to index.html
+	 * so client-side routing works.
+	 * https://developers.cloudflare.com/workers/static-assets/
+	 */
+	"assets": {
+		"directory": "../frontend/dist",
+		"binding": "ASSETS",
+		"not_found_handling": "single-page-application",
+		"run_worker_first": true
+	},
+	/**
+	 * R2 — voice-note audio (Voice Notes v1.5). Never public: the bucket has no
+	 * public access or custom domain, and audio is served only through the
+	 * session-gated GET /api/voice/{key} route. Creating the bucket is Elle's
+	 * call:  npx wrangler r2 bucket create vale-os-voice-notes
+	 * (Local `wrangler dev` simulates the binding without the real bucket.)
+	 */
+	/**
+	 * The Gallery sweeper. Every minute, the scheduled handler re-drives
+	 * pending generations whose background work was killed by the 30s
+	 * waitUntil cap — the cron context has the 15-minute wall clock the
+	 * request path doesn't. Quiet no-op when nothing is stuck.
+	 */
+	"triggers": {
+		"crons": ["* * * * *"]
+	},
+	"r2_buckets": [
+		{
+			"binding": "VOICE_NOTES",
+			"bucket_name": "vale-os-voice-notes"
+		},
+		/**
+		 * R2 — Gallery images (The Gallery). Same posture as voice notes: never
+		 * public, no custom domain. Full images + thumbs serve only through the
+		 * session-gated GET /api/gallery/file/* route; reference images go to
+		 * getimg via 5-minute presigned URLs minted per generation. Creating
+		 * the bucket is Elle's call:  npx wrangler r2 bucket create vale-os-gallery
+		 */
+		{
+			"binding": "GALLERY",
+			"bucket_name": "vale-os-gallery"
+		}
+	]
+	/**
+	 * Smart Placement
+	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
+	 */
+	// "placement": {  "mode": "smart" }
+	/**
+	 * Bindings
+	 * Bindings allow your Worker to interact with resources on the Cloudflare Developer Platform, including
+	 * databases, object storage, AI inference, real-time communication and more.
+	 * https://developers.cloudflare.com/workers/runtime-apis/bindings/
+	 */
+	/**
+	 * Static Assets
+	 * https://developers.cloudflare.com/workers/static-assets/binding/
+	 */
+	// "assets": {  "directory": "./public/",  "binding": "ASSETS" }
+	/**
+	 * Service Bindings (communicate between multiple Workers)
+	 * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings
+	 */
+	// "services": [  {   "binding": "MY_SERVICE",   "service": "my-service"  } ]
+}

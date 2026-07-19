@@ -1,0 +1,32 @@
+# ---- Dependencies ----
+# Installed packages. Huge, regenerated from package.json with `npm install`,
+# never committed.
+node_modules/
+
+# ---- Environment / secrets ----
+# NEVER commit these. They hold API keys and other secrets.
+.env
+.env.*
+.dev.vars
+.dev.vars.*
+# Carve-out: the frontend build config is NOT secret — a localhost URL, "/api",
+# and the PUBLIC VAPID key — so a fresh clone builds without a manual step.
+!frontend/.env.development
+!frontend/.env.production
+
+# ---- Build output ----
+# Generated artefacts, rebuilt on demand.
+dist/
+build/
+.output/
+
+# ---- Cloudflare / Wrangler ----
+.wrangler/
+
+# ---- OS / editor junk ----
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+
+template-build/

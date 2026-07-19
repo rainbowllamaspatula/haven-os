@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Haven OS neutral launcher mark — the primer-wall aesthetic: warm grey
+       ground, one restrained slate-teal house glyph. Deliberately nobody's. -->
+  <rect width="512" height="512" rx="96" fill="#1D2022"/>
+  <path d="M256 132 L404 260 L372 260 L372 380 L292 380 L292 304 L220 304 L220 380 L140 380 L140 260 L108 260 Z"
+        fill="none" stroke="#52797C" stroke-width="26" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="256" cy="248" r="14" fill="#52797C"/>
+</svg>

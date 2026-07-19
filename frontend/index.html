@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- Neutral default; the Décor runtime (and the Worker, at serve time)
+         overwrite this with the active theme's background. -->
+    <meta name="theme-color" content="#141618" />
+    <!-- Neutral shell branding (Haven fork): the Worker swaps the house name
+         in at serve time from the Identity circuit, like the theme below. -->
+    <meta name="description" content="A private home." />
+    <title>Haven OS</title>
+    <!-- Fonts and Tabler icons are bundled locally (imported in main.tsx) so the
+         offline shell renders with no network. No CDN requests. -->
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <!-- iOS install path: no beforeinstallprompt on Safari, so Add to Home
+         Screen relies on these. -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon-180.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Haven OS" />
+  </head>
+  <body>
+    <!-- The Décor circuit's mount point. Empty in the repo (the compiled CSS
+         is the neutral default); the Worker fills it with the active theme at
+         serve time (data-live). Sits in <body> ON PURPOSE: Vite appends the
+         built stylesheet at the end of <head>, and the theme must come after
+         it to win the cascade. The boot script below runs before first paint:
+         a last-good copy in localStorage outranks whatever the document
+         carries (an offline load serves the precached shell, whose injected
+         theme may be stale), and a server-injected theme seeds that copy on
+         a device's first themed visit. -->
+    <style id="decor"></style>
+    <script>
+      (function () {
+        try {
+          var el = document.getElementById('decor');
+          var saved = localStorage.getItem('vale-decor-css');
+          if (saved !== null) el.textContent = saved;
+          else if (el.hasAttribute('data-live'))
+            localStorage.setItem('vale-decor-css', el.textContent);
+          // The light switch: mode is device dressing, applied before first
+          // paint so a light-mode device never flashes dark (or vice versa).
+          if (localStorage.getItem('vale-decor-mode') === 'light')
+            document.documentElement.setAttribute('data-decor-mode', 'light');
+        } catch (e) {
+          /* storage unavailable — the document's own theme (or neutral) shows */
+        }
+      })();
+    </script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

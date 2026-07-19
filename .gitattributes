@@ -1,0 +1,6 @@
+# Normalise line endings across operating systems.
+# Text files are stored with LF in the repository and checked out with LF,
+# so Windows (CRLF) vs Unix (LF) differences never create noisy diffs or
+# warnings, and the repo stays consistent if it's ever touched from another
+# machine or built on Linux (which is where Cloudflare runs it).
+* text=auto eol=lf

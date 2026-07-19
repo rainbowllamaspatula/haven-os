@@ -1,0 +1,24 @@
+{
+  "name": "haven-os",
+  "private": true,
+  "description": "A self-hosted home for one person and their AI companion — one Cloudflare Worker, one Supabase project, every personal fact config.",
+  "scripts": {
+    "build": "cd frontend && npm ci && npm run build",
+    "deploy": "cd backend && npm ci && npx wrangler deploy",
+    "test": "cd backend && npm test",
+    "make-template": "node scripts/make-template.mjs"
+  },
+  "cloudflare": {
+    "bindings": {
+      "VOICE_NOTES": {
+        "description": "R2 bucket for voice-note audio. Never public — served only through the app's session-gated route."
+      },
+      "GALLERY": {
+        "description": "R2 bucket for generated images and reference photos. Never public."
+      },
+      "ANTHROPIC_API_KEY": {
+        "description": "Managed in-app (Secrets Store). The setup wizard writes the value — leave the placeholder at deploy time."
+      }
+    }
+  }
+}
