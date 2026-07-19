@@ -44,7 +44,7 @@ You run it on your own accounts. Your keys, your bill, your canon.
    images, a memory seed, the décor — is a panel in **the Fuse Box** (drawer →
    The Fuse Box, desktop only), flipped whenever you're ready. No deploys.
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=REPLACE_WITH_YOUR_TEMPLATE_REPO_URL)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/rainbowllamaspatula/haven-os)
 
 ## Honest requirements & limits
 
