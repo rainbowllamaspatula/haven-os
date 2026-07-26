@@ -3,10 +3,13 @@
   "private": true,
   "description": "A self-hosted home for one person and their AI companion — one Cloudflare Worker, one Supabase project, every personal fact config.",
   "scripts": {
-    "build": "cd frontend && npm ci && npm run build",
-    "deploy": "cd backend && npm ci && npx wrangler deploy",
+    "build": "cd frontend && npm ci && npm run build && cd ../backend && npm ci",
+    "deploy": "npx wrangler deploy",
     "test": "cd backend && npm test",
     "make-template": "node scripts/make-template.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.114.0"
   },
   "cloudflare": {
     "bindings": {
