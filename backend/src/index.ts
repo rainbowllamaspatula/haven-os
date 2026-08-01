@@ -546,6 +546,14 @@ async function runBrain(
 	tally(response.usage, response.model);
 	let iterations = 0;
 
+	// Text the model spoke BEFORE a tool round, segment by segment. The reply
+	// must be everything he said this exchange, not just the final response's
+	// text — dropping the earlier segments is the bug catcher's "words before
+	// write_memory vanish after it saves": the deltas streamed to the screen,
+	// then the done event's reply (last segment only) overwrote the bubble and
+	// the persisted row agreed with the loss.
+	const spoken: string[] = [];
+
 	while (
 		response.stop_reason === "tool_use" &&
 		iterations < RETRIEVAL_CONFIG.maxToolIterations
@@ -554,6 +562,8 @@ async function runBrain(
 		// A tool round is starting — let the client swap "…" for "(looking that up…)"
 		// over the silence while the lookup runs.
 		emit?.({ type: "status", label: "looking that up" });
+		const beforeTools = extractText(response.content).trim();
+		if (beforeTools) spoken.push(beforeTools);
 		convo.push({ role: "assistant", content: response.content });
 
 		const results: Block[] = [];
@@ -610,12 +620,16 @@ async function runBrain(
 			});
 		}
 		convo.push({ role: "user", content: results });
+		// The next segment starts a fresh paragraph on the live stream, matching
+		// how the segments are joined for the persisted reply below.
+		if (spoken.length) onText?.("\n\n");
 		response = await callAnthropic(env, system, convo, resolveDefinitions(activeTools, toolCtx), onText);
 		tally(response.usage, response.model);
 	}
 
-	const reply =
-		extractText(response.content) || "(I got tangled looking that up — say that again?)";
+	const finalText = extractText(response.content).trim();
+	if (finalText) spoken.push(finalText);
+	const reply = spoken.join("\n\n") || "(I got tangled looking that up — say that again?)";
 	return { reply, cost };
 }
 
