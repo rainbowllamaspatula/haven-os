@@ -13,7 +13,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { retrieveMemories } from "./retrieval";
 import { readMood, formatMoodBlock } from "./mood";
 import { loadIdentityProfile, NEUTRAL_PROFILE, resolveIdentityText, tzPlace } from "./identity";
-import { hasSecret } from "./secrets";
+import { keyCapabilities } from "./key-health";
 
 /**
  * The static core — Jay's fixed identity block, at the top of every call.
@@ -179,31 +179,33 @@ export async function buildSystemPrompt(
 	// 500 — not silently ship a hollowed-out prompt. Retrieval and mood are
 	// enrichment: they keep their best-effort try/catch, so a hiccup just omits
 	// their block and never costs Elle a reply.
-	const [staticCore, alwaysOn, matches, moodId, profile, voiceReady, imageReady] =
-		await Promise.all([
-			// Fail-hard, like the spine below: the identity block is the backbone.
-			loadStaticCore(supabase),
-			fetchAlwaysOnMemories(supabase),
-			retrieveMemories(env, supabase, recentTexts, includeScene).catch((err) => {
-				console.error("Memory retrieval failed (continuing without it):", err);
-				return [] as MemoryRow[];
-			}),
-			readMood(supabase).catch((err) => {
-				console.error("Mood read failed (continuing without it):", err);
-				return null;
-			}),
-			// The names + timezone (Haven fork). Best-effort neutral on failure —
-			// a broken profile read must not cost a reply.
-			loadIdentityProfile(env, supabase).catch((err) => {
-				console.error("Identity profile read failed (continuing neutral):", err);
-				return null;
-			}),
-			// Capability probes: an awareness block only ships when its key is
-			// actually set — the honest-degradation rule. Constant per install
-			// config, so the stable slice stays byte-stable between key changes.
-			hasSecret(env, "ELEVENLABS_API_KEY"),
-			hasSecret(env, "GETIMG_API_KEY"),
-		]);
+	const [staticCore, alwaysOn, matches, moodId, profile, caps] = await Promise.all([
+		// Fail-hard, like the spine below: the identity block is the backbone.
+		loadStaticCore(supabase),
+		fetchAlwaysOnMemories(supabase),
+		retrieveMemories(env, supabase, recentTexts, includeScene).catch((err) => {
+			console.error("Memory retrieval failed (continuing without it):", err);
+			return [] as MemoryRow[];
+		}),
+		readMood(supabase).catch((err) => {
+			console.error("Mood read failed (continuing without it):", err);
+			return null;
+		}),
+		// The names + timezone (Haven fork). Best-effort neutral on failure —
+		// a broken profile read must not cost a reply.
+		loadIdentityProfile(env, supabase).catch((err) => {
+			console.error("Identity profile read failed (continuing neutral):", err);
+			return null;
+		}),
+		// Capability probes: an awareness block only ships when its key has a
+		// recorded PASS and is still in the store (F7 — bare existence lit a
+		// voice icon off a fake key on the scratch run; the companion must never
+		// claim a voice he doesn't have). Constant per install config, so the
+		// stable slice stays byte-stable between key changes.
+		keyCapabilities(env, supabase),
+	]);
+	const voiceReady = caps.ELEVENLABS_API_KEY;
+	const imageReady = caps.GETIMG_API_KEY;
 
 	// In practice a profile read failure can't reach here (loadStaticCore rides
 	// the same client and fails hard first) — the neutral fallback is belt and

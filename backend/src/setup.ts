@@ -17,9 +17,10 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { passwordMatches } from "./auth";
-import { ensureStoreCoordinates, saveKey } from "./fusebox-keys";
+import { ensureStoreCoordinates, saveKey, testKey } from "./fusebox-keys";
 import { fetchWithTimeout } from "./http";
 import { validateIdentityProfile } from "./identity";
+import { recordKeyHealth } from "./key-health";
 
 const PBKDF2_ITERATIONS = 100_000;
 
@@ -202,9 +203,26 @@ export async function handleSetupRequest(
 		const coords = await ensureStoreCoordinates(env, supabase);
 		if (!coords.ok) return json({ ok: false, error: coords.error }, 502);
 
-		// 2. The Anthropic key, through the same machinery the keys circuit uses.
+		// 2. The Anthropic key, through the same machinery the keys circuit
+		//    uses — then the REAL test against the stored value, its verdict
+		//    recorded as the key's health flag (F7: readiness believes the flag,
+		//    never bare existence — a button deploy leaves every secret
+		//    "existing" with placeholder values). A failure here aborts before
+		//    the password write, so the install stays virgin and retryable.
 		const savedKey = await saveKey(env, supabase, "ANTHROPIC_API_KEY", anthropicKey);
 		if (!savedKey.ok) return json({ ok: false, error: savedKey.error }, 502);
+		const tested = await testKey(env, "ANTHROPIC_API_KEY");
+		if (!tested.ok) {
+			return json(
+				{ ok: false, error: `The key was stored, but its live test failed: ${tested.detail}` },
+				502,
+			);
+		}
+		try {
+			await recordKeyHealth(supabase, "ANTHROPIC_API_KEY", true, tested.detail);
+		} catch (err) {
+			return json({ ok: false, error: (err as Error).message }, 502);
+		}
 
 		// 3. Identity profile.
 		{

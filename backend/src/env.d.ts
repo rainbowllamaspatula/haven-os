@@ -64,13 +64,20 @@ interface Env {
 	 */
 	GALLERY_MCP_TOKEN: string;
 	/**
-	 * R2 S3-compat credentials, Object-Read scoped to vale-os-gallery only —
+	 * R2 S3-compat credentials, Object-Read scoped to the gallery bucket only —
 	 * they exist solely so gallery.ts can presign 5-minute reference URLs for
 	 * getimg to fetch (the R2 *binding* can't mint presigned URLs). Both
 	 * secrets:  npx wrangler secret put R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY
 	 */
 	R2_ACCESS_KEY_ID: string;
 	R2_SECRET_ACCESS_KEY: string;
+	/**
+	 * The gallery bucket's NAME, for the presigned reference URLs above — the
+	 * binding hides it, the S3 URL needs it. Config, not code (scratch-run
+	 * F10): each install names its own bucket; lives in wrangler.jsonc vars
+	 * and must match the GALLERY binding's bucket_name.
+	 */
+	GALLERY_BUCKET: string;
 	/**
 	 * Cloudflare account id — names the R2 S3 endpoint the presigner signs for.
 	 * An identifier, not a secret; lives in wrangler.jsonc vars.

@@ -5,11 +5,7 @@
   "scripts": {
     "build": "cd frontend && npm ci && npm run build && cd ../backend && npm ci",
     "deploy": "npx wrangler deploy",
-    "test": "cd backend && npm test",
-    "make-template": "node scripts/make-template.mjs"
-  },
-  "devDependencies": {
-    "wrangler": "^4.114.0"
+    "test": "cd backend && npm test"
   },
   "cloudflare": {
     "bindings": {
@@ -20,8 +16,29 @@
         "description": "R2 bucket for generated images and reference photos. Never public."
       },
       "ANTHROPIC_API_KEY": {
-        "description": "Managed in-app (Secrets Store). The setup wizard writes the value — leave the placeholder at deploy time."
+        "description": "Managed in-app (Secrets Store). The setup wizard writes the value — create the secret with the placeholder value UNSET and move on."
+      },
+      "ELEVENLABS_API_KEY": {
+        "description": "Managed in-app (Secrets Store) — the admin panel sets it when you're ready for voice. Create the secret with the placeholder value UNSET and move on."
+      },
+      "GETIMG_API_KEY": {
+        "description": "Managed in-app (Secrets Store) — the admin panel sets it when you're ready for images. Create the secret with the placeholder value UNSET and move on."
+      },
+      "HA_MCP_URL": {
+        "description": "Managed in-app (Secrets Store) — the admin panel sets it if you connect Home Assistant. Create the secret with the placeholder value UNSET and move on."
+      },
+      "HA_TOKEN": {
+        "description": "Managed in-app (Secrets Store) — the admin panel sets it if you connect Home Assistant. Create the secret with the placeholder value UNSET and move on."
+      },
+      "NOTION_TOKEN": {
+        "description": "Managed in-app (Secrets Store) — the admin panel sets it if you connect Notion. Create the secret with the placeholder value UNSET and move on."
+      },
+      "OPENROUTER_API_KEY": {
+        "description": "Managed in-app (Secrets Store) — powers memory embeddings; the admin panel sets it. Create the secret with the placeholder value UNSET and move on."
       }
     }
+  },
+  "devDependencies": {
+    "wrangler": "^4.114.0"
   }
 }

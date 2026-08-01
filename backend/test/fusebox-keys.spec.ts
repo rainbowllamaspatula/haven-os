@@ -10,12 +10,17 @@ const ENV = {
 } as unknown as Env;
 
 // A preferences read that finds nothing — the Haven-fork fallback path when an
-// env id is missing. Rows can be supplied for the config-resolution test.
-const dbWithRows = (rows: Array<{ key: string; value: unknown }>): SupabaseClient =>
+// env id is missing. Rows can be supplied for the config-resolution test;
+// health rows (keys.health.*) for the tested-flag merge (F7/F8).
+const dbWithRows = (
+	rows: Array<{ key: string; value: unknown }>,
+	healthRows: Array<{ key: string; value: unknown }> = [],
+): SupabaseClient =>
 	({
 		from: () => ({
 			select: () => ({
 				in: async () => ({ data: rows, error: null }),
+				like: async () => ({ data: healthRows, error: null }),
 			}),
 		}),
 	}) as unknown as SupabaseClient;
@@ -54,8 +59,11 @@ describe("the registry", () => {
 		}
 	});
 
-	it("secret names carry no spaces (API rule)", () => {
-		for (const k of KEY_REGISTRY) expect(k.secretName).not.toMatch(/\s/);
+	it("names are store-legal and canonical: no spaces (API rule), uppercase (the binding-name convention, F6)", () => {
+		for (const k of KEY_REGISTRY) {
+			expect(k.name).not.toMatch(/\s/);
+			expect(k.name).toBe(k.name.toUpperCase());
+		}
 	});
 });
 
@@ -91,7 +99,7 @@ describe("resolveStoreConfig - env first, preferences second, fail loud by name"
 });
 
 describe("listKeys - registry merged with store metadata", () => {
-	it("marks stored keys set (with modified) and absent keys not set", async () => {
+	it("marks stored keys set (with modified) and absent keys not set — legacy lowercase rows match", async () => {
 		stubFetch(() =>
 			envelope([
 				{ id: "id-a", name: "anthropic_api_key", modified: "2026-07-18T02:00:00Z" },
@@ -103,11 +111,44 @@ describe("listKeys - registry merged with store metadata", () => {
 		if (!listed.ok) return;
 		expect(listed.keys).toHaveLength(KEY_REGISTRY.length);
 		const anthropic = listed.keys.find((k) => k.name === "ANTHROPIC_API_KEY");
-		expect(anthropic).toMatchObject({ set: true, modified: "2026-07-18T02:00:00Z" });
+		expect(anthropic).toMatchObject({
+			set: true,
+			modified: "2026-07-18T02:00:00Z",
+			// The actual store row name is reported, whatever its case.
+			secret_name: "anthropic_api_key",
+		});
 		const notion = listed.keys.find((k) => k.name === "NOTION_TOKEN");
-		expect(notion).toMatchObject({ set: false, modified: null });
+		expect(notion).toMatchObject({ set: false, modified: null, secret_name: "NOTION_TOKEN" });
 		// Unmanaged store rows never leak into the registry view.
 		expect(listed.keys.some((k) => k.secret_name === "some_unmanaged_secret")).toBe(false);
+	});
+
+	it("matches button-created UPPERCASE rows too (F6: one key, either case)", async () => {
+		stubFetch(() => envelope([{ id: "id-a", name: "ANTHROPIC_API_KEY", modified: "2026-07-26T02:00:00Z" }]));
+		const listed = await listKeys(ENV, EMPTY_DB);
+		expect(listed.ok).toBe(true);
+		if (!listed.ok) return;
+		const anthropic = listed.keys.find((k) => k.name === "ANTHROPIC_API_KEY");
+		expect(anthropic).toMatchObject({ set: true, secret_name: "ANTHROPIC_API_KEY" });
+	});
+
+	it("merges the recorded test verdict; an untested key reads tested: null (F8)", async () => {
+		stubFetch(() => envelope([{ id: "id-a", name: "ANTHROPIC_API_KEY" }]));
+		const health = [
+			{
+				key: "keys.health.ANTHROPIC_API_KEY",
+				value: { ok: true, tested_at: "2026-07-26T03:00:00Z", detail: "Anthropic accepted the key." },
+			},
+		];
+		const listed = await listKeys(ENV, dbWithRows([], health));
+		expect(listed.ok).toBe(true);
+		if (!listed.ok) return;
+		const anthropic = listed.keys.find((k) => k.name === "ANTHROPIC_API_KEY");
+		expect(anthropic?.tested).toMatchObject({ ok: true, tested_at: "2026-07-26T03:00:00Z" });
+		// Set in the store but never tested: exactly the state the scratch run's
+		// placeholder secrets were in — visible as unproven, not as ready.
+		const notion = listed.keys.find((k) => k.name === "NOTION_TOKEN");
+		expect(notion?.tested).toBeNull();
 	});
 
 	it("fails loud with the missing config name, without calling the API", async () => {
@@ -148,19 +189,39 @@ describe("saveKey - fixed registry, update-by-id, create-with-scopes", () => {
 		expect(JSON.parse(String(patch!.init!.body))).toEqual({ value: "secret-value" });
 	});
 
-	it("POSTs a new secret as an array with the workers scope when absent from the store", async () => {
+	it("PATCHes a button-created UPPERCASE secret instead of creating a duplicate (F5)", async () => {
+		// The scratch-run crash: the store held ANTHROPIC_API_KEY (the deploy
+		// button's casing), the app looked for lowercase, found "nothing", tried
+		// to create — and the store's case-insensitive uniqueness rejected it.
+		// The fix: any case-variant is THE secret, and is updated in place.
+		const calls: Array<{ url: string; init?: RequestInit }> = [];
+		stubFetch((url, init) => {
+			calls.push({ url, init });
+			if (!init?.method || init.method === "GET") {
+				return envelope([{ id: "id-A", name: "ANTHROPIC_API_KEY", modified: "x" }]);
+			}
+			return envelope({ id: "id-A", name: "ANTHROPIC_API_KEY" });
+		});
+		const saved = await saveKey(ENV, EMPTY_DB, "ANTHROPIC_API_KEY", "sk-ant-real");
+		expect(saved).toEqual({ ok: true, created: false });
+		expect(calls.some((c) => c.init?.method === "POST")).toBe(false);
+		const patch = calls.find((c) => c.init?.method === "PATCH");
+		expect(patch!.url).toContain("/secrets/id-A");
+	});
+
+	it("POSTs a new secret as an array, workers scope, under the binding name, when genuinely absent", async () => {
 		const calls: Array<{ url: string; init?: RequestInit }> = [];
 		stubFetch((url, init) => {
 			calls.push({ url, init });
 			if (!init?.method || init.method === "GET") return envelope([]);
-			return envelope([{ id: "id-new", name: "getimg_api_key" }]);
+			return envelope([{ id: "id-new", name: "GETIMG_API_KEY" }]);
 		});
 		const saved = await saveKey(ENV, EMPTY_DB, "GETIMG_API_KEY", "key-123");
 		expect(saved).toEqual({ ok: true, created: true });
 		const post = calls.find((c) => c.init?.method === "POST");
 		expect(post).toBeDefined();
 		expect(JSON.parse(String(post!.init!.body))).toEqual([
-			{ name: "getimg_api_key", value: "key-123", scopes: ["workers"] },
+			{ name: "GETIMG_API_KEY", value: "key-123", scopes: ["workers"] },
 		]);
 	});
 

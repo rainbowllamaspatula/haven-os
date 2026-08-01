@@ -1853,6 +1853,9 @@ body {
   border: 1px solid var(--tx3);
 }
 .fusebox__keydot--set { background: var(--teal-300); border-color: var(--teal-300); }
+/* In the store but never tested (F8): present isn't proven — bronze, not teal. */
+.fusebox__keydot--unverified { background: var(--bronze); border-color: var(--bronze); }
+.fusebox__keydot--failing { background: var(--red); border-color: var(--red); }
 .fusebox__keyid { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .fusebox__keyname { font-family: var(--mono); font-size: 12.5px; color: var(--tx); }
 .fusebox__keyconsumer { font-size: 11px; color: var(--tx3); }

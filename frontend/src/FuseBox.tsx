@@ -273,6 +273,9 @@ type PromptData = {
 
 // One managed key's status row, as /api/fusebox/keys reports it. Metadata
 // only — a value can never appear here because no value can ever come back.
+// `tested` is the recorded verdict of the last real API test (F7/F8): "set"
+// alone only means a secret exists, which on a button-deployed install is
+// true of every key before any of them holds a real value.
 type KeyRow = {
   name: string;
   secret_name: string;
@@ -280,6 +283,7 @@ type KeyRow = {
   testable: boolean;
   set: boolean;
   modified: string | null;
+  tested: { ok: boolean; tested_at: string; detail?: string } | null;
 };
 
 export function FuseBox({ active }: { active: boolean }) {
@@ -339,7 +343,12 @@ export function FuseBox({ active }: { active: boolean }) {
         });
         const data = await res.json();
         if (data.ok) {
-          note(name, true, data.created ? 'Created in the store.' : 'Rotated in the store.');
+          // The save now carries its own live-test verdict (F7/F8) — show it
+          // honestly: a stored-but-failing key must never read as a win.
+          const saved = data.created ? 'Created in the store' : 'Rotated in the store';
+          if (data.test?.ok) note(name, true, `${saved} — verified: ${data.test.detail}`);
+          else if (data.test) note(name, false, `${saved}, but the test failed: ${data.test.detail}`);
+          else note(name, true, `${saved}.`);
           setRotating(null);
           setDraft('');
           loadKeys();
@@ -364,13 +373,16 @@ export function FuseBox({ active }: { active: boolean }) {
         const res = await fbFetch(`/fusebox/keys/${name}/test`, { method: 'POST' });
         const data = await res.json();
         note(name, !!data.ok, data.detail ?? 'No verdict.');
+        // The verdict is recorded server-side as the key's health flag —
+        // refresh so the row's verified state matches what readiness now sees.
+        loadKeys();
       } catch {
         note(name, false, 'Test failed — the panel is not answering.');
       } finally {
         setKeyBusy(null);
       }
     },
-    [keyBusy],
+    [keyBusy, loadKeys],
   );
 
   // ── Identity circuit state ────────────────────────────────────────────────
@@ -1767,19 +1779,37 @@ export function FuseBox({ active }: { active: boolean }) {
                 <div key={k.name} className="fusebox__keyrow">
                   <div className="fusebox__keymain">
                     <span
-                      className={`fusebox__keydot ${k.set ? 'fusebox__keydot--set' : ''}`}
-                      title={k.set ? 'Set in the Secrets Store' : 'Not in the Secrets Store yet'}
+                      className={`fusebox__keydot ${
+                        k.tested?.ok
+                          ? 'fusebox__keydot--set'
+                          : k.set && k.tested
+                            ? 'fusebox__keydot--failing'
+                            : k.set
+                              ? 'fusebox__keydot--unverified'
+                              : ''
+                      }`}
+                      title={
+                        k.tested?.ok
+                          ? 'Tested and passed'
+                          : k.set && k.tested
+                            ? 'In the store, but failing its test'
+                            : k.set
+                              ? 'In the store, never tested — could be a deploy-time placeholder'
+                              : 'Not in the Secrets Store yet'
+                      }
                     />
                     <div className="fusebox__keyid">
                       <span className="fusebox__keyname">{k.name}</span>
                       <span className="fusebox__keyconsumer">{k.consumer}</span>
                     </div>
                     <span className="fusebox__keymeta">
-                      {k.set
-                        ? k.modified
-                          ? `updated ${agoLabel(new Date(k.modified).getTime())}`
-                          : 'set'
-                        : 'not set'}
+                      {k.tested?.ok
+                        ? `verified ${agoLabel(new Date(k.tested.tested_at).getTime())}`
+                        : k.set && k.tested
+                          ? 'failing its test'
+                          : k.set
+                            ? 'set, unverified'
+                            : 'not set'}
                     </span>
                     <div className="fusebox__keyactions">
                       {k.testable && (
@@ -1840,7 +1870,8 @@ export function FuseBox({ active }: { active: boolean }) {
 
               <div className="fusebox__foot">
                 Tests run against the value the house actually runs on — the Secrets Store
-                binding. Rotation is live on the next call; no deploy.
+                binding — and every verdict is recorded: rooms light only on a key that has
+                passed. Rotation is live on the next call; no deploy.
               </div>
             </div>
           )}

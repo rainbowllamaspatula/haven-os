@@ -52,7 +52,8 @@ import {
 } from "./notion-tools";
 import { createTask } from "./postbox";
 import { callMcpTool, haServer } from "./mcp";
-import { getSecret, hasSecret } from "./secrets";
+import { getSecret } from "./secrets";
+import { keyCapabilities } from "./key-health";
 import {
 	loadIdentityProfile,
 	NEUTRAL_PROFILE,
@@ -934,24 +935,22 @@ export async function buildToolContext(
 	env: Env,
 	supabase: SupabaseClient,
 ): Promise<ToolResolutionContext> {
-	const [profile, elevenlabs, getimg, haUrl, haToken, notion, vacuums, mappings] =
-		await Promise.all([
-			loadIdentityProfile(env, supabase).catch(() => NEUTRAL_PROFILE),
-			hasSecret(env, "ELEVENLABS_API_KEY"),
-			hasSecret(env, "GETIMG_API_KEY"),
-			hasSecret(env, "HA_MCP_URL"),
-			hasSecret(env, "HA_TOKEN"),
-			hasSecret(env, "NOTION_TOKEN"),
-			loadVacuumRoster(env).catch(() => null),
-			loadWorkshopMappings(env).catch(() => null),
-		]);
+	const [profile, keys, vacuums, mappings] = await Promise.all([
+		loadIdentityProfile(env, supabase).catch(() => NEUTRAL_PROFILE),
+		// Tested-and-passed flags, not bare store presence (F7): a capability
+		// whose key never passed a real test is simply not offered, so an
+		// unconfigured house's brain never carries tools it can't honour.
+		keyCapabilities(env, supabase),
+		loadVacuumRoster(env).catch(() => null),
+		loadWorkshopMappings(env).catch(() => null),
+	]);
 	return {
 		profile,
 		caps: {
-			elevenlabs,
-			getimg,
-			ha: haUrl && haToken,
-			notion,
+			elevenlabs: keys.ELEVENLABS_API_KEY,
+			getimg: keys.GETIMG_API_KEY,
+			ha: keys.HA_MCP_URL && keys.HA_TOKEN,
+			notion: keys.NOTION_TOKEN,
 			// Spotify rides classic Wrangler secrets (OAuth triplet), not the store.
 			spotify: Boolean(env.SPOTIFY_CLIENT_ID && env.SPOTIFY_CLIENT_SECRET && env.SPOTIFY_REFRESH_TOKEN),
 		},

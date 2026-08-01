@@ -21,6 +21,18 @@
  *                  scopes must include "workers" or the binding deploy rejects
  *   update  PATCH  .../secrets/{secret_id} — by ID, never by name
  *
+ * CASE, learned the hard way (scratch-account run, 26 Jul 2026, F5/F6): the
+ * store's name uniqueness is CASE-INSENSITIVE (creating "anthropic_api_key"
+ * beside "ANTHROPIC_API_KEY" is rejected as a duplicate) but the deployed
+ * binding's runtime lookup is effectively CASE-SENSITIVE — and the Deploy
+ * button creates secrets under the BINDING name, uppercase. So: every store
+ * lookup here matches names case-insensitively, an existing secret is always
+ * PATCHed in place whatever its case, and a genuinely absent secret is
+ * created under the binding name — the one convention the template's
+ * wrangler config now shares (secret_name === binding name). Our install's
+ * legacy lowercase rows predate the convention; the case-insensitive match
+ * finds them and rotation PATCHes them in place, so they never need renaming.
+ *
  * Post-cutover: consumers and test buttons alike resolve values through
  * secrets.ts (the binding), so a test exercises exactly what the house runs
  * on — the store value — and a rotation is testable the second it saves.
@@ -28,14 +40,19 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchWithTimeout } from "./http";
+import { readKeyHealth, type KeyHealth } from "./key-health";
 import { haServer, pingMcp } from "./mcp";
 import { getSecret } from "./secrets";
 
 export type KeyRegistryEntry = {
-	/** Registry + env/binding name, e.g. "ANTHROPIC_API_KEY". */
+	/**
+	 * Registry + env/binding name AND the canonical store secret name, e.g.
+	 * "ANTHROPIC_API_KEY". One name on purpose (F6): the Deploy button creates
+	 * store secrets under the binding name, so the app creates under it too;
+	 * store rows in any other case (our legacy lowercase set) are matched
+	 * case-insensitively and updated in place, never duplicated.
+	 */
 	name: string;
-	/** Secrets Store secret name, e.g. "anthropic_api_key". No spaces — API rule. */
-	secretName: string;
 	/** One line of who-uses-it, for the UI row. */
 	consumer: string;
 	/** Whether a cheap, safe test exists (never a billable call). */
@@ -46,37 +63,31 @@ export type KeyRegistryEntry = {
 export const KEY_REGISTRY: KeyRegistryEntry[] = [
 	{
 		name: "ANTHROPIC_API_KEY",
-		secretName: "anthropic_api_key",
 		consumer: "the brain · voice render · Polish · Post Box titles",
 		testable: true,
 	},
 	{
 		name: "ELEVENLABS_API_KEY",
-		secretName: "elevenlabs_api_key",
 		consumer: "voice notes",
 		testable: true,
 	},
 	{
 		name: "GETIMG_API_KEY",
-		secretName: "getimg_api_key",
 		consumer: "the Gallery",
 		testable: true,
 	},
 	{
 		name: "HA_MCP_URL",
-		secretName: "ha_mcp_url",
 		consumer: "the Hearth · home tools (MCP endpoint)",
 		testable: true,
 	},
 	{
 		name: "HA_TOKEN",
-		secretName: "ha_token",
 		consumer: "the Hearth · home tools",
 		testable: true,
 	},
 	{
 		name: "NOTION_TOKEN",
-		secretName: "notion_token",
 		consumer: "Workshop · journal · Post Box tasks",
 		testable: true,
 	},
@@ -86,7 +97,6 @@ export const KEY_REGISTRY: KeyRegistryEntry[] = [
 		// managed here like every other outbound key — enterable in the wizard,
 		// rotatable deploy-free. Memory's re-embed-or-don't-save rule rides on it.
 		name: "OPENROUTER_API_KEY",
-		secretName: "openrouter_api_key",
 		consumer: "memory embeddings (retrieval + write_memory)",
 		testable: true,
 	},
@@ -187,12 +197,20 @@ export type KeyStatusRow = {
 	testable: boolean;
 	set: boolean;
 	modified: string | null;
+	/**
+	 * The last recorded test verdict, or null when the key has never been
+	 * tested through the app (F8: "set" only means a secret exists — on a
+	 * button install that's true of every key before any holds a real value).
+	 */
+	tested: KeyHealth | null;
 };
 
 /**
  * The registry merged with the store's metadata list. Status and last-updated
  * come straight from the store (Read-visible metadata only — never a value,
- * because no value can ever come back).
+ * because no value can ever come back). Matching is case-insensitive (F6):
+ * a button-created ANTHROPIC_API_KEY and our legacy anthropic_api_key are the
+ * same key, and the store itself agrees — it refuses to hold both.
  */
 export async function listKeys(env: Env, supabase: SupabaseClient): Promise<
 	{ ok: true; keys: KeyStatusRow[] } | { ok: false; error: string }
@@ -201,27 +219,40 @@ export async function listKeys(env: Env, supabase: SupabaseClient): Promise<
 	if ("missing" in cfg) return { ok: false, error: `The keys circuit is missing ${cfg.missing}.` };
 	const listed = await storeFetch<StoreSecretRow[]>(cfg, "/secrets?per_page=100");
 	if (!listed.ok) return listed;
-	const stored = new Map(listed.result.map((s) => [s.name, s]));
+	const stored = new Map(listed.result.map((s) => [s.name.toLowerCase(), s]));
+	// Health flags are best-effort here: a read hiccup shows "unverified", it
+	// never takes the whole circuit view down.
+	const health = await readKeyHealth(supabase).catch((err) => {
+		console.error("key health read failed (listing without it):", err);
+		return new Map<string, KeyHealth>();
+	});
 	return {
 		ok: true,
 		keys: KEY_REGISTRY.map((entry) => {
-			const row = stored.get(entry.secretName);
+			const row = stored.get(entry.name.toLowerCase());
 			return {
 				name: entry.name,
-				secret_name: entry.secretName,
+				// The row's actual store name when one exists (whatever its case),
+				// the canonical binding name otherwise.
+				secret_name: row?.name ?? entry.name,
 				consumer: entry.consumer,
 				testable: entry.testable,
 				set: row !== undefined,
 				modified: row?.modified ?? row?.created ?? null,
+				tested: health.get(entry.name) ?? null,
 			};
 		}),
 	};
 }
 
 /**
- * Save a new value for a registry key: PATCH by ID when the secret exists,
- * POST (create, scopes ["workers"]) when it doesn't. Registry names only —
- * an unknown name is refused, not created (the fixed-registry rule).
+ * Save a new value for a registry key: PATCH by ID when the secret exists —
+ * IN ANY CASE (F5: the deploy button pre-creates every secret uppercase, and
+ * the store's case-insensitive uniqueness makes a lowercase create beside it
+ * a hard error, which is exactly the crash the scratch run hit) — and POST
+ * (create, scopes ["workers"], under the binding name) only when the secret
+ * is genuinely absent. Registry names only — an unknown name is refused,
+ * not created (the fixed-registry rule).
  */
 export async function saveKey(
 	env: Env,
@@ -246,7 +277,7 @@ export async function saveKey(
 	// Name → ID: the update endpoint addresses secrets by ID only.
 	const listed = await storeFetch<StoreSecretRow[]>(cfg, "/secrets?per_page=100");
 	if (!listed.ok) return listed;
-	const existing = listed.result.find((s) => s.name === entry.secretName);
+	const existing = listed.result.find((s) => s.name.toLowerCase() === entry.name.toLowerCase());
 
 	if (existing) {
 		const patched = await storeFetch<StoreSecretRow>(cfg, `/secrets/${existing.id}`, {
@@ -260,8 +291,9 @@ export async function saveKey(
 	const created = await storeFetch<StoreSecretRow[]>(cfg, "/secrets", {
 		method: "POST",
 		// The body is an array by API shape; scopes must include "workers" or a
-		// later binding deploy is rejected outright.
-		body: JSON.stringify([{ name: entry.secretName, value: clean, scopes: ["workers"] }]),
+		// later binding deploy is rejected outright. The name is the binding
+		// name — the one convention the runtime's case-sensitive lookup honours.
+		body: JSON.stringify([{ name: entry.name, value: clean, scopes: ["workers"] }]),
 	});
 	if (!created.ok) return created;
 	return { ok: true, created: true };

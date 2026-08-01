@@ -99,10 +99,11 @@ export const DEFAULT_ASPECT_RATIO = "1:1";
 export const modelSpec = (id: string): ModelSpec | undefined =>
 	MODEL_CATALOG.find((m) => m.id === id);
 
-// ── Storage layout in the vale-os-gallery bucket ────────────────────────────
+// ── Storage layout in the gallery bucket ────────────────────────────────────
 // Never public: Elle's grid reads through the session-gated Worker route, and
-// getimg reads references through short-lived presigned URLs (below).
-export const GALLERY_BUCKET = "vale-os-gallery";
+// getimg reads references through short-lived presigned URLs (below). The
+// bucket's NAME comes from env.GALLERY_BUCKET (wrangler vars) — each install
+// names its own bucket, so a name in code would be our house in theirs.
 export const imageKey = (id: string) => `images/${id}.png`;
 export const thumbKey = (id: string) => `thumbs/${id}_thumb.webp`;
 
@@ -302,7 +303,7 @@ export async function presignGalleryUrl(env: Env, storagePath: string): Promise<
 		secretAccessKey: env.R2_SECRET_ACCESS_KEY,
 	});
 	const url = new URL(
-		`https://${env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com/${GALLERY_BUCKET}/${storagePath}`,
+		`https://${env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com/${env.GALLERY_BUCKET}/${storagePath}`,
 	);
 	url.searchParams.set("X-Amz-Expires", String(REFERENCE_URL_TTL_S));
 	const signed = await client.sign(new Request(url, { method: "GET" }), {

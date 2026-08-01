@@ -69,7 +69,8 @@ import {
 	injectDecor,
 	parseDecorImport,
 } from "./decor";
-import { listKeys, saveKey, testKey } from "./fusebox-keys";
+import { KEY_REGISTRY, listKeys, saveKey, testKey } from "./fusebox-keys";
+import { keyCapabilities, recordKeyHealth } from "./key-health";
 import {
 	listMemories,
 	spineStats,
@@ -95,7 +96,7 @@ import {
 	loadAudioRoster,
 	loadWorkshopBlocks,
 } from "./config";
-import { getSecret, hasSecret } from "./secrets";
+import { getSecret } from "./secrets";
 import { loadIdentityProfile, validateIdentityProfile, resolveIdentityText } from "./identity";
 import { readMood, writeMood, isValidMood } from "./mood";
 import { getProjects } from "./projects";
@@ -884,16 +885,41 @@ export default {
 					);
 				}
 				const saved = await saveKey(env, fuseboxDb, keyMatch[1], body.value);
-				return saved.ok
-					? Response.json({ ok: true, created: saved.created }, { headers: CORS })
-					: Response.json({ ok: false, error: saved.error }, { status: 400, headers: CORS });
+				if (!saved.ok) {
+					return Response.json({ ok: false, error: saved.error }, { status: 400, headers: CORS });
+				}
+				// Every save is followed by the real test, and the verdict recorded
+				// (F7/F8): the flag — not the store's "a secret exists" — is what
+				// readiness and the brain's capability gates believe.
+				const tested = await testKey(env, keyMatch[1]);
+				let test = tested;
+				try {
+					await recordKeyHealth(fuseboxDb, keyMatch[1], tested.ok, tested.detail);
+				} catch (err) {
+					test = {
+						...tested,
+						detail: `${tested.detail} (but the verdict couldn't be recorded: ${
+							err instanceof Error ? err.message : String(err)
+						})`,
+					};
+				}
+				return Response.json({ ok: true, created: saved.created, test }, { headers: CORS });
 			}
 
 			const testMatch = url.pathname.match(/^\/api\/fusebox\/keys\/([A-Z0-9_]+)\/test$/);
 			if (request.method === "POST" && testMatch) {
 				// `ok` here is the test VERDICT, not transport success — the client
-				// renders it as the pass/fail note either way.
+				// renders it as the pass/fail note either way. The verdict is also
+				// recorded as the key's health flag (F7/F8), pass or fail — but
+				// only for registry names; a refused unknown name records nothing.
 				const tested = await testKey(env, testMatch[1]);
+				if (KEY_REGISTRY.some((k) => k.name === testMatch[1])) {
+					try {
+						await recordKeyHealth(fuseboxDb, testMatch[1], tested.ok, tested.detail);
+					} catch (err) {
+						console.error(`key health record failed for ${testMatch[1]}:`, err);
+					}
+				}
 				return Response.json(tested, { headers: CORS });
 			}
 
@@ -2272,35 +2298,30 @@ export default {
 		}
 
 		// ── GET /api/readiness — which capabilities this install holds, for the
-		// rooms' honest empty states. Store-metadata + config reads only; never
-		// a billable call. ─────────────────────────────────────────────────────
+		// rooms' honest empty states. Tested-and-passed flags AND store presence
+		// (F7: existence alone lit every room on a store full of "UNSET"; only a
+		// recorded real-API pass reflects reality). Never a billable call — the
+		// flags were earned by the wizard's and the circuit's own tests. ───────
 		if (request.method === "GET" && url.pathname === "/api/readiness") {
 			try {
-				const [anthropic, elevenlabs, getimg, haUrl, haToken, notion, openrouter, prefs] =
-					await Promise.all([
-						hasSecret(env, "ANTHROPIC_API_KEY"),
-						hasSecret(env, "ELEVENLABS_API_KEY"),
-						hasSecret(env, "GETIMG_API_KEY"),
-						hasSecret(env, "HA_MCP_URL"),
-						hasSecret(env, "HA_TOKEN"),
-						hasSecret(env, "NOTION_TOKEN"),
-						hasSecret(env, "OPENROUTER_API_KEY"),
-						supabase
-							.from("preferences")
-							.select("key")
-							.in("key", ["hearth.registry", "hearth.vacuums", "hearth.audio", "workshop.mappings"]),
-					]);
+				const [caps, prefs] = await Promise.all([
+					keyCapabilities(env, supabase),
+					supabase
+						.from("preferences")
+						.select("key")
+						.in("key", ["hearth.registry", "hearth.vacuums", "hearth.audio", "workshop.mappings"]),
+				]);
 				const have = new Set((prefs.data ?? []).map((r) => r.key));
 				return Response.json(
 					{
 						ok: true,
 						readiness: {
-							anthropic,
-							elevenlabs,
-							getimg,
-							ha: haUrl && haToken,
-							notion,
-							openrouter,
+							anthropic: caps.ANTHROPIC_API_KEY,
+							elevenlabs: caps.ELEVENLABS_API_KEY,
+							getimg: caps.GETIMG_API_KEY,
+							ha: caps.HA_MCP_URL && caps.HA_TOKEN,
+							notion: caps.NOTION_TOKEN,
+							openrouter: caps.OPENROUTER_API_KEY,
 							spotify: Boolean(
 								env.SPOTIFY_CLIENT_ID && env.SPOTIFY_CLIENT_SECRET && env.SPOTIFY_REFRESH_TOKEN,
 							),
@@ -3303,7 +3324,13 @@ export default {
 						const profile = await loadIdentityProfile(env, gateDb);
 						const manifest = JSON.parse(await res.text()) as Record<string, unknown>;
 						manifest.name = profile.house_name;
-						manifest.short_name = profile.house_name;
+						// short_name sits under a home-screen icon — launchers truncate
+						// past ~12 characters (scratch-run F14: "Moonlight Bay" clips).
+						// A long house name falls back to its first word, hard-capped.
+						manifest.short_name =
+							profile.house_name.length <= 12
+								? profile.house_name
+								: (profile.house_name.split(/\s+/)[0] ?? profile.house_name).slice(0, 12);
 						headers.delete("Content-Length");
 						headers.delete("ETag");
 						headers.delete("Last-Modified");

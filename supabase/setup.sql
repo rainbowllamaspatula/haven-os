@@ -395,16 +395,15 @@ $$;
 -- The room catalogue. Haven v1 opens four rooms + the Fuse Box (which is a
 -- panel, not a room row); the rest of the catalogue ships dormant ('soon') —
 -- present in the drawer, inert until a future update opens one.
+-- Only rooms that exist in Haven are seeded (scratch-run ruling, 26 Jul
+-- 2026): "soon" is a promise, and Haven's room-set diverges from the source
+-- house by design — a label for a room that is never coming is a lie in the
+-- hallway. Un-activated rooms may show; non-existent ones must not.
 insert into rooms (name, display_name, icon, sort_order, status) values
   ('front_room',     'Front Room',     'ti-message-circle',   1, 'live'),
   ('workshop',       'Workshop',       'ti-tools',            2, 'live'),
   ('hearth',         'The Hearth',     'ti-home',             3, 'live'),
-  ('gallery',        'Gallery',        'ti-photo',            4, 'live'),
-  ('post_box',       'Post Box',       'ti-mail',             5, 'soon'),
-  ('listening_room', 'Listening Room', 'ti-headphones',       6, 'soon'),
-  ('notebook',       'Notebook',       'ti-book',             7, 'soon'),
-  ('bedroom',        'Bedroom',        'ti-moon',             8, 'soon'),
-  ('games_room',     'Games Room',     'ti-device-gamepad-2', 9, 'soon')
+  ('gallery',        'Gallery',        'ti-photo',            4, 'live')
 on conflict (name) do nothing;
 
 -- Memory taxonomy reference lists (the write_memory / curation vocabulary).

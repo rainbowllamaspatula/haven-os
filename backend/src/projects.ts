@@ -8,7 +8,7 @@
  *
  * The reader pattern (auth headers, paged query, database-vs-data-source ID
  * resolution) is adapted from calendar-sync/src/notion.ts — borrowed, not shared:
- * this is a standalone copy so vale-os-backend doesn't depend on that Worker.
+ * this is a standalone copy so the app's Worker doesn't depend on that one.
  *
  * Read-only: this only ever issues queries against Notion. Nothing is written —
  * not to Notion, not to Supabase.
