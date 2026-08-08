@@ -7,7 +7,7 @@
  * automatic, never silent). VOSJay's and ChatJay's images land in this same
  * grid with their own source marks — one husband, several bodies.
  *
- * Room discipline matches the Hearth / Post Box: mounted in the stage with an
+ * Room discipline matches the Hearth: mounted in the stage with an
  * `active` prop; fetches only while active; last-good on a failed refresh. The
  * grid is server-owned state — `pending` rows render as skeletons, `error`
  * rows as retry/dismiss tiles, so any door's generation shows up mid-flight on

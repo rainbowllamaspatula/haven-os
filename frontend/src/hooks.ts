@@ -1,5 +1,5 @@
 /**
- * Shared room hooks — the patterns the Hearth, Listening Room and Post Box each
+ * Shared room hooks — the patterns the source house's rooms each
  * hand-rolled, extracted once so they can't drift apart again (per-key pending in
  * one room vs a whole-room lockout in another; colliding flash timers; a stale
  * read overwriting a fresh one). Every future room inherits these instead of
@@ -100,7 +100,7 @@ export function useVisiblePoll(
 // ── useSettledAction ─────────────────────────────────────────────────────────
 // The honest-control pattern: mark a control pending, fire, then ALWAYS re-read
 // so it shows the real resulting state — never an optimistic fake. Keyed, so one
-// control settling never locks the whole room (the Listening Room's old
+// control settling never locks the whole room (an earlier room's old
 // whole-room lockout). Fixes the Hearth's colliding flash timers (ref-held, one
 // per key) and gates the settle + trailing reads on `active` so a control acted
 // on just before leaving the room can't fire a read into a hidden room.
@@ -115,8 +115,8 @@ export function useSettledAction(opts: {
   flashMs: number;
   active: boolean;
   refresh: () => Promise<unknown>;
-  // Optional: the failure reason per key, for rooms that show it (the Listening
-  // Room's NO_ACTIVE_DEVICE message) rather than a plain "didn't take".
+  // Optional: the failure reason per key, for rooms that show a specific
+  // message rather than a plain "didn't take".
   onError?: (key: string, err: unknown) => void;
 }): {
   // gate (default true) drops a stacked commit for a key already in flight — right

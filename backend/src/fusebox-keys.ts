@@ -63,7 +63,7 @@ export type KeyRegistryEntry = {
 export const KEY_REGISTRY: KeyRegistryEntry[] = [
 	{
 		name: "ANTHROPIC_API_KEY",
-		consumer: "the brain · voice render · Polish · Post Box titles",
+		consumer: "the brain · voice render · Polish",
 		testable: true,
 	},
 	{
@@ -88,7 +88,7 @@ export const KEY_REGISTRY: KeyRegistryEntry[] = [
 	},
 	{
 		name: "NOTION_TOKEN",
-		consumer: "Workshop · journal · Post Box tasks",
+		consumer: "Workshop · journal · tasks",
 		testable: true,
 	},
 	{

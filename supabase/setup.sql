@@ -26,8 +26,7 @@ create extension if not exists vector with schema extensions;
 create table if not exists rooms (
   id uuid primary key default gen_random_uuid(),
   name text not null unique check (name = any (array[
-    'front_room','gallery','listening_room','workshop','notebook',
-    'bedroom','hearth','games_room','post_box'])),
+    'front_room','gallery','workshop','hearth'])),
   state jsonb not null default '{}'::jsonb,
   last_entered_at timestamptz,
   display_name text,
@@ -123,7 +122,7 @@ create table if not exists memories (
 create table if not exists awareness_signals (
   id uuid primary key default gen_random_uuid(),
   signal_type text not null check (signal_type = any (array[
-    'calendar_event','spotify_play','notion_change','location_change','ha_state','mood_status'])),
+    'calendar_event','notion_change','location_change','ha_state','mood_status'])),
   payload jsonb not null default '{}'::jsonb,
   received_at timestamptz not null default now(),
   processed boolean not null default false
@@ -217,21 +216,6 @@ create table if not exists sync_health (
   last_ok_at timestamptz
 );
 
-create table if not exists push_subscriptions (
-  endpoint text primary key,
-  p256dh text not null,
-  auth text not null,
-  created_at timestamptz not null default now(),
-  auth_fail_count integer not null default 0
-);
-
-create table if not exists postbox_sync_state (
-  id integer primary key default 1 check (id = 1),
-  last_internal_date bigint not null default 0,
-  updated_at timestamptz not null default now(),
-  last_pushed_internal_date bigint
-);
-
 -- ── Row level security: service-role only, everywhere, on purpose.
 -- The Worker holds the service key; no anon policies exist at all. ──
 
@@ -250,8 +234,6 @@ alter table gallery_references enable row level security;
 alter table images enable row level security;
 alter table calendar_mirror enable row level security;
 alter table sync_health enable row level security;
-alter table push_subscriptions enable row level security;
-alter table postbox_sync_state enable row level security;
 
 -- ── Functions (the app's RPCs) ──────────────────────────────
 
@@ -393,12 +375,11 @@ $$;
 -- ── Seeds — structure only, never content ───────────────────
 
 -- The room catalogue. Haven v1 opens four rooms + the Fuse Box (which is a
--- panel, not a room row); the rest of the catalogue ships dormant ('soon') —
--- present in the drawer, inert until a future update opens one.
--- Only rooms that exist in Haven are seeded (scratch-run ruling, 26 Jul
--- 2026): "soon" is a promise, and Haven's room-set diverges from the source
--- house by design — a label for a room that is never coming is a lie in the
--- hallway. Un-activated rooms may show; non-existent ones must not.
+-- panel, not a room row). Only rooms that exist in Haven are seeded
+-- (scratch-run ruling, 26 Jul 2026): "soon" is a promise, and Haven's
+-- room-set diverges from the source house by design — a label for a room
+-- that is never coming is a lie in the hallway. A future update that opens
+-- a new room extends the name check and this seed in the same pull request.
 insert into rooms (name, display_name, icon, sort_order, status) values
   ('front_room',     'Front Room',     'ti-message-circle',   1, 'live'),
   ('workshop',       'Workshop',       'ti-tools',            2, 'live'),

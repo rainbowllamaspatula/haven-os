@@ -102,42 +102,7 @@ import { readMood, writeMood, isValidMood } from "./mood";
 import { getProjects } from "./projects";
 import { getBlockTiles, getDataSourceSchema } from "./workshop-blocks";
 import { getRecent, searchNotion } from "./notion";
-import {
-	getViews,
-	getMessages,
-	getMessage,
-	modifyLabels,
-	markRead,
-	setStar,
-	archiveMessage,
-	trashMessage,
-	sendMail,
-	saveDraft,
-	updateDraft,
-	deleteDraft,
-	getDrafts,
-	createTask,
-	suggestTaskTitle,
-	inboxGlance,
-	type Compose,
-	type TaskInput,
-} from "./postbox";
 import { getWeather } from "./weather";
-import {
-	getNowPlayingCached,
-	bustNowPlayingCache,
-	getRecentlyPlayed,
-	getPlaylists,
-	searchBrowse,
-	play,
-	pause,
-	nextTrack,
-	previousTrack,
-	setShuffle,
-	setRepeat,
-	setPlayerVolume,
-	seekTo,
-} from "./spotify";
 import {
 	getHomeCached,
 	setLight,
@@ -2336,12 +2301,6 @@ export default {
 							ha: caps.HA_MCP_URL && caps.HA_TOKEN,
 							notion: caps.NOTION_TOKEN,
 							openrouter: caps.OPENROUTER_API_KEY,
-							spotify: Boolean(
-								env.SPOTIFY_CLIENT_ID && env.SPOTIFY_CLIENT_SECRET && env.SPOTIFY_REFRESH_TOKEN,
-							),
-							gmail: Boolean(
-								env.GMAIL_CLIENT_ID && env.GMAIL_CLIENT_SECRET && env.GMAIL_REFRESH_TOKEN,
-							),
 							hearth_rosters: have.has("hearth.registry"),
 							workshop_mappings: have.has("workshop.mappings"),
 						},
@@ -2442,8 +2401,8 @@ export default {
 		}
 
 		// ── GET /api/ambient?lat=&lon= — the whole ambient bar in one wake ─────
-		// Composes the four ambient sources (next event, weather, now-playing,
-		// mood) so the client polls ONCE per tick instead of waking the phone radio
+		// Composes the ambient sources (next event, weather, mood) so the client
+		// polls ONCE per tick instead of waking the phone radio
 		// three times. Each source already has its own server-side cache + last-good;
 		// this is thin Promise.allSettled composition, per-field null on failure so
 		// one dead upstream never blanks the others. Additive — the individual routes
@@ -2459,7 +2418,7 @@ export default {
 			const lat = hasDeviceCoords ? qLat : parseFloat(String(cf?.latitude ?? ""));
 			const lon = hasDeviceCoords ? qLon : parseFloat(String(cf?.longitude ?? ""));
 
-			const [nextR, weatherR, nowPlayingR, moodR] = await Promise.allSettled([
+			const [nextR, weatherR, moodR] = await Promise.allSettled([
 				nextEvent(supabase, now),
 				(async () => {
 					// No usable fix — null, so the client keeps its last-good tile.
@@ -2474,7 +2433,6 @@ export default {
 							null;
 					return { ...weather, place };
 				})(),
-				getNowPlayingCached(env),
 				readMood(supabase),
 			]);
 
@@ -2482,14 +2440,13 @@ export default {
 			// null = the calendar read FAILED this tick (client keeps last-good), while
 			// { event: null } = it succeeded and genuinely nothing is coming up (client
 			// clears the tile) — the same distinction GET /api/calendar makes with its
-			// status code. Weather/nowPlaying/mood have no legitimate null value, so a
+			// status code. Weather/mood have no legitimate null value, so a
 			// bare null on those simply means "failed, keep last-good".
 			return Response.json(
 				{
 					ok: true,
 					next: nextR.status === "fulfilled" ? { event: nextR.value } : null,
 					weather: weatherR.status === "fulfilled" ? weatherR.value : null,
-					nowPlaying: nowPlayingR.status === "fulfilled" ? nowPlayingR.value : null,
 					mood: moodR.status === "fulfilled" ? moodR.value : null,
 				},
 				{ headers: renewCookie ? { ...CORS, "Set-Cookie": renewCookie } : CORS },
@@ -2630,332 +2587,6 @@ export default {
 			}
 		}
 
-			// ══ Post Box — the mail room ═══════════════════════════════════════════
-			// The Workshop Mail tile retired into this: a full Gmail client as a room.
-			// Views ARE Gmail labels (no mirror); the scope is gmail.modify, so these
-			// routes read, relabel, send, and draft. Every write is a deliberate,
-			// Elle-confirmed action in the UI. A Gmail failure surfaces as 502.
-
-			// GET /api/postbox/views — the view chips + their true unread counts.
-			// from_address rides along (config, was a frontend constant) for the
-			// compose From line.
-			if (request.method === "GET" && url.pathname === "/api/postbox/views") {
-				try {
-					const { data } = await supabase
-						.from("preferences")
-						.select("value")
-						.eq("key", "postbox.from_address")
-						.maybeSingle();
-					return Response.json(
-						{
-							ok: true,
-							...(await getViews(env)),
-							from_address: typeof data?.value === "string" ? data.value : null,
-						},
-						{ headers: CORS },
-					);
-				} catch (err) {
-					return Response.json(
-						{ ok: false, error: (err as Error).message },
-						{ status: 502, headers: CORS },
-					);
-				}
-			}
-
-			// GET /api/postbox/messages?view=<key> — the label-filtered mail list.
-			if (request.method === "GET" && url.pathname === "/api/postbox/messages") {
-				const view = url.searchParams.get("view") ?? "inbox";
-				try {
-					return Response.json({ ok: true, ...(await getMessages(env, view)) }, { headers: CORS });
-				} catch (err) {
-					return Response.json(
-						{ ok: false, error: (err as Error).message },
-						{ status: 502, headers: CORS },
-					);
-				}
-			}
-
-			// GET /api/postbox/message?id=<id> — one message in full (read view).
-			// Opening marks it read (best-effort — a failed mark never costs the open).
-			if (request.method === "GET" && url.pathname === "/api/postbox/message") {
-				const id = url.searchParams.get("id");
-				if (!id) {
-					return Response.json({ ok: false, error: "Missing id." }, { status: 400, headers: CORS });
-				}
-				try {
-					const message = await getMessage(env, id);
-					ctx.waitUntil(markRead(env, id).catch(() => {}));
-					return Response.json({ ok: true, message }, { headers: CORS });
-				} catch (err) {
-					return Response.json(
-						{ ok: false, error: (err as Error).message },
-						{ status: 502, headers: CORS },
-					);
-				}
-			}
-
-			// POST /api/postbox/label — relabel (the triage mechanism). Body
-			// { id, add: [viewKey], remove: [viewKey] } → addLabelIds / removeLabelIds.
-			if (request.method === "POST" && url.pathname === "/api/postbox/label") {
-				let body: { id?: string; add?: string[]; remove?: string[] };
-				try {
-					body = await request.json();
-				} catch {
-					return Response.json({ ok: false, error: "Body must be JSON." }, { status: 400, headers: CORS });
-				}
-				if (!body.id) {
-					return Response.json({ ok: false, error: "Missing id." }, { status: 400, headers: CORS });
-				}
-				try {
-					const r = await modifyLabels(env, body.id, body.add ?? [], body.remove ?? []);
-					return Response.json({ ok: true, ...r }, { headers: CORS });
-				} catch (err) {
-					return Response.json(
-						{ ok: false, error: (err as Error).message },
-						{ status: 502, headers: CORS },
-					);
-				}
-			}
-
-			// POST /api/postbox/triage — archive or trash. Body { id, action }.
-			if (request.method === "POST" && url.pathname === "/api/postbox/triage") {
-				let body: { id?: string; action?: string };
-				try {
-					body = await request.json();
-				} catch {
-					return Response.json({ ok: false, error: "Body must be JSON." }, { status: 400, headers: CORS });
-				}
-				if (!body.id || (body.action !== "archive" && body.action !== "trash")) {
-					return Response.json(
-						{ ok: false, error: "Need id and action (archive|trash)." },
-						{ status: 400, headers: CORS },
-					);
-				}
-				try {
-					if (body.action === "archive") await archiveMessage(env, body.id);
-					else await trashMessage(env, body.id);
-					return Response.json({ ok: true }, { headers: CORS });
-				} catch (err) {
-					return Response.json(
-						{ ok: false, error: (err as Error).message },
-						{ status: 502, headers: CORS },
-					);
-				}
-			}
-
-			// POST /api/postbox/star — star/unstar (the "keep in inbox" pin). Body
-			// { id, starred }. The auto-archive sweep spares starred mail.
-			if (request.method === "POST" && url.pathname === "/api/postbox/star") {
-				let body: { id?: string; starred?: boolean };
-				try {
-					body = await request.json();
-				} catch {
-					return Response.json({ ok: false, error: "Body must be JSON." }, { status: 400, headers: CORS });
-				}
-				if (!body.id) {
-					return Response.json({ ok: false, error: "Missing id." }, { status: 400, headers: CORS });
-				}
-				try {
-					await setStar(env, body.id, body.starred === true);
-					return Response.json({ ok: true }, { headers: CORS });
-				} catch (err) {
-					return Response.json(
-						{ ok: false, error: (err as Error).message },
-						{ status: 502, headers: CORS },
-					);
-				}
-			}
-
-			// POST /api/postbox/send — send or reply (threaded). Body is a Compose.
-			if (request.method === "POST" && url.pathname === "/api/postbox/send") {
-				let body: Compose;
-				try {
-					body = await request.json();
-				} catch {
-					return Response.json({ ok: false, error: "Body must be JSON." }, { status: 400, headers: CORS });
-				}
-				if (!body.to || !body.subject) {
-					return Response.json(
-						{ ok: false, error: "Need at least a recipient and a subject." },
-						{ status: 400, headers: CORS },
-					);
-				}
-				try {
-					const r = await sendMail(env, body);
-					return Response.json({ ok: true, ...r }, { headers: CORS });
-				} catch (err) {
-					return Response.json(
-						{ ok: false, error: (err as Error).message },
-						{ status: 502, headers: CORS },
-					);
-				}
-			}
-
-			// GET /api/postbox/drafts — the drafts list, each parsed to reopen in compose.
-			if (request.method === "GET" && url.pathname === "/api/postbox/drafts") {
-				try {
-					return Response.json({ ok: true, ...(await getDrafts(env)) }, { headers: CORS });
-				} catch (err) {
-					return Response.json(
-						{ ok: false, error: (err as Error).message },
-						{ status: 502, headers: CORS },
-					);
-				}
-			}
-
-			// POST /api/postbox/draft — save a draft on close. A body with draftId
-			// updates that draft in place (no duplicate); without one, creates a new
-			// draft. Returns the draftId either way.
-			if (request.method === "POST" && url.pathname === "/api/postbox/draft") {
-				let body: Compose;
-				try {
-					body = await request.json();
-				} catch {
-					return Response.json({ ok: false, error: "Body must be JSON." }, { status: 400, headers: CORS });
-				}
-				try {
-					const r = body.draftId
-						? await updateDraft(env, body.draftId, body)
-						: await saveDraft(env, body);
-					return Response.json({ ok: true, ...r }, { headers: CORS });
-				} catch (err) {
-					return Response.json(
-						{ ok: false, error: (err as Error).message },
-						{ status: 502, headers: CORS },
-					);
-				}
-			}
-
-			// POST /api/postbox/draft/delete — discard a draft for good. Gmail's
-			// drafts.delete is permanent (no trash stop on the way out), which is
-			// why the frontend arms the bin before it ever calls this.
-			if (request.method === "POST" && url.pathname === "/api/postbox/draft/delete") {
-				let body: { draftId?: string };
-				try {
-					body = await request.json();
-				} catch {
-					return Response.json({ ok: false, error: "Body must be JSON." }, { status: 400, headers: CORS });
-				}
-				if (!body.draftId) {
-					return Response.json({ ok: false, error: "Need a draftId." }, { status: 400, headers: CORS });
-				}
-				try {
-					await deleteDraft(env, body.draftId);
-					return Response.json({ ok: true }, { headers: CORS });
-				} catch (err) {
-					return Response.json(
-						{ ok: false, error: (err as Error).message },
-						{ status: 502, headers: CORS },
-					);
-				}
-			}
-
-			// POST /api/postbox/task — capture-to-Task: write a row to EV25-Tasks.
-			if (request.method === "POST" && url.pathname === "/api/postbox/task") {
-				let body: TaskInput;
-				try {
-					body = await request.json();
-				} catch {
-					return Response.json({ ok: false, error: "Body must be JSON." }, { status: 400, headers: CORS });
-				}
-				if (!body.title || !body.date) {
-					return Response.json(
-						{ ok: false, error: "Need a title and a date." },
-						{ status: 400, headers: CORS },
-					);
-				}
-				try {
-					const r = await createTask(env, body);
-					return Response.json({ ok: true, ...r }, { headers: CORS });
-				} catch (err) {
-					return Response.json(
-						{ ok: false, error: (err as Error).message },
-						{ status: 502, headers: CORS },
-					);
-				}
-			}
-
-			// POST /api/postbox/suggest-title — an AI action title for the Task sheet.
-			if (request.method === "POST" && url.pathname === "/api/postbox/suggest-title") {
-				let body: { subject?: string; snippet?: string; from?: string };
-				try {
-					body = await request.json();
-				} catch {
-					return Response.json({ ok: false, error: "Body must be JSON." }, { status: 400, headers: CORS });
-				}
-				try {
-					const r = await suggestTaskTitle(env, {
-						subject: body.subject ?? "",
-						snippet: body.snippet ?? "",
-						from: body.from ?? "",
-					});
-					return Response.json({ ok: true, ...r }, { headers: CORS });
-				} catch (err) {
-					return Response.json(
-						{ ok: false, error: (err as Error).message },
-						{ status: 502, headers: CORS },
-					);
-				}
-			}
-
-			// GET /api/postbox/notification — the glance the service worker fetches on
-			// a push to build the notification, and the room shows as a header count.
-			if (request.method === "GET" && url.pathname === "/api/postbox/notification") {
-				try {
-					return Response.json({ ok: true, glance: await inboxGlance(env) }, { headers: CORS });
-				} catch (err) {
-					return Response.json(
-						{ ok: false, error: (err as Error).message },
-						{ status: 502, headers: CORS },
-					);
-				}
-			}
-
-			// POST /api/postbox/push/subscribe — store the PushSubscription the browser
-			// minted, so the labelling Worker can push to this device. Upsert on
-			// endpoint (re-subscribing the same device replaces, never duplicates).
-			if (request.method === "POST" && url.pathname === "/api/postbox/push/subscribe") {
-				let body: { subscription?: { endpoint?: string; keys?: { p256dh?: string; auth?: string } } };
-				try {
-					body = await request.json();
-				} catch {
-					return Response.json({ ok: false, error: "Body must be JSON." }, { status: 400, headers: CORS });
-				}
-				const sub = body.subscription;
-				if (!sub?.endpoint || !sub.keys?.p256dh || !sub.keys?.auth) {
-					return Response.json(
-						{ ok: false, error: "Malformed subscription." },
-						{ status: 400, headers: CORS },
-					);
-				}
-				const { error } = await supabase
-					.from("push_subscriptions")
-					.upsert(
-						{ endpoint: sub.endpoint, p256dh: sub.keys.p256dh, auth: sub.keys.auth },
-						{ onConflict: "endpoint" },
-					);
-				if (error) {
-					return Response.json({ ok: false, error: error.message }, { status: 500, headers: CORS });
-				}
-				return Response.json({ ok: true }, { headers: CORS });
-			}
-
-			// POST /api/postbox/push/unsubscribe — drop a device's subscription.
-			if (request.method === "POST" && url.pathname === "/api/postbox/push/unsubscribe") {
-				let body: { endpoint?: string };
-				try {
-					body = await request.json();
-				} catch {
-					return Response.json({ ok: false, error: "Body must be JSON." }, { status: 400, headers: CORS });
-				}
-				if (!body.endpoint) {
-					return Response.json({ ok: false, error: "Missing endpoint." }, { status: 400, headers: CORS });
-				}
-				await supabase.from("push_subscriptions").delete().eq("endpoint", body.endpoint);
-				return Response.json({ ok: true }, { headers: CORS });
-			}
-
-
 		// GET /api/weather — the ambient bar's weather tile. Read-only current
 		// conditions from Open-Meteo (keyless, CC-BY 4.0). Two location paths: the
 		// client passes ?lat=&lon= from the device GPS fix (precise), or — when it
@@ -3004,152 +2635,6 @@ export default {
 					},
 					{ headers: CORS },
 				);
-			} catch (err) {
-				return Response.json(
-					{ ok: false, error: (err as Error).message },
-					{ status: 502, headers: CORS },
-				);
-			}
-		}
-
-		// ── GET /api/spotify/now-playing — the ambient bar's "playing" tile ────
-		// Weather-route shape: thin and read-only; the short in-Worker cache and
-		// last-good-on-failure live inside getNowPlayingCached. Nothing playing is
-		// a clean idle payload (ok:true, playing:false), never an error — only a
-		// failure with no last-good surfaces as 502, and the client keeps its own
-		// last-good then too. Network-only like every /api/* route (SW rules).
-		if (request.method === "GET" && url.pathname === "/api/spotify/now-playing") {
-			try {
-				const nowPlaying = await getNowPlayingCached(env);
-				return Response.json({ ok: true, nowPlaying }, { headers: CORS });
-			} catch (err) {
-				return Response.json(
-					{ ok: false, error: (err as Error).message },
-					{ status: 502, headers: CORS },
-				);
-			}
-		}
-
-		// ══ The Listening Room — browse reads + transport on native spotify.ts ══
-		// Reads are ~60s-cached + last-good inside spotify.ts; transport is one
-		// action route whose every use is an explicit Elle tap in the room. A
-		// control success busts the now-playing cache so the hero's follow-up
-		// read shows truth (the Hearth's read-after-write lesson, pre-applied).
-
-		if (request.method === "GET" && url.pathname === "/api/spotify/recent") {
-			try {
-				return Response.json({ ok: true, tracks: await getRecentlyPlayed(env) }, { headers: CORS });
-			} catch (err) {
-				return Response.json(
-					{ ok: false, error: (err as Error).message },
-					{ status: 502, headers: CORS },
-				);
-			}
-		}
-
-		if (request.method === "GET" && url.pathname === "/api/spotify/playlists") {
-			try {
-				// owner_display: the account's own display name (config, was a
-				// frontend constant) so the room can label those playlists "you".
-				const { data } = await supabase
-					.from("preferences")
-					.select("value")
-					.eq("key", "listening.owner_display")
-					.maybeSingle();
-				return Response.json(
-					{
-						ok: true,
-						playlists: await getPlaylists(env),
-						owner_display: typeof data?.value === "string" ? data.value : null,
-					},
-					{ headers: CORS },
-				);
-			} catch (err) {
-				return Response.json(
-					{ ok: false, error: (err as Error).message },
-					{ status: 502, headers: CORS },
-				);
-			}
-		}
-
-		// GET /api/spotify/search?q= — structured browse search (tracks, playlists,
-		// artists). Uncached, per-query, same as the Workshop's Notion search.
-		if (request.method === "GET" && url.pathname === "/api/spotify/search") {
-			const q = (url.searchParams.get("q") ?? "").trim();
-			if (!q) return Response.json({ ok: true, results: [] }, { headers: CORS });
-			try {
-				return Response.json({ ok: true, results: await searchBrowse(env, q) }, { headers: CORS });
-			} catch (err) {
-				return Response.json(
-					{ ok: false, error: (err as Error).message },
-					{ status: 502, headers: CORS },
-				);
-			}
-		}
-
-		// POST /api/spotify/player — the room's transport. Body { action, ... }:
-		// play (uri optional), pause, next, previous, shuffle {on}, repeat
-		// {state: off|context|track}, volume {level 0–100}, seek {position_ms}.
-		if (request.method === "POST" && url.pathname === "/api/spotify/player") {
-			let body: {
-				action?: string;
-				uri?: string;
-				on?: boolean;
-				state?: string;
-				level?: number;
-				position_ms?: number;
-			};
-			try {
-				body = await request.json();
-			} catch {
-				return Response.json({ ok: false, error: "Body must be JSON." }, { status: 400, headers: CORS });
-			}
-			try {
-				switch (body.action) {
-					case "play":
-						await play(env, typeof body.uri === "string" ? body.uri : undefined);
-						break;
-					case "pause":
-						await pause(env);
-						break;
-					case "next":
-						await nextTrack(env);
-						break;
-					case "previous":
-						await previousTrack(env);
-						break;
-					case "shuffle":
-						await setShuffle(env, body.on === true);
-						break;
-					case "repeat":
-						await setRepeat(env, body.state ?? "");
-						break;
-					case "volume":
-						if (typeof body.level !== "number") {
-							return Response.json(
-								{ ok: false, error: "volume needs a level (0–100)." },
-								{ status: 400, headers: CORS },
-							);
-						}
-						await setPlayerVolume(env, body.level);
-						break;
-					case "seek":
-						if (typeof body.position_ms !== "number") {
-							return Response.json(
-								{ ok: false, error: "seek needs a position_ms." },
-								{ status: 400, headers: CORS },
-							);
-						}
-						await seekTo(env, body.position_ms);
-						break;
-					default:
-						return Response.json(
-							{ ok: false, error: `Unknown action "${body.action}".` },
-							{ status: 400, headers: CORS },
-						);
-				}
-				bustNowPlayingCache();
-				return Response.json({ ok: true }, { headers: CORS });
 			} catch (err) {
 				return Response.json(
 					{ ok: false, error: (err as Error).message },

@@ -16,13 +16,7 @@ interface __BaseEnv_Env {
 	CF_ACCOUNT_ID: "your-account-id";
 	CF_STORE_ID: "00000000000000000000000000000000";
 	SUPABASE_SERVICE_ROLE_KEY: string;
-	GMAIL_CLIENT_ID: string;
-	GMAIL_CLIENT_SECRET: string;
-	GMAIL_REFRESH_TOKEN: string;
 	ENVIRONMENT: string;
-	SPOTIFY_REFRESH_TOKEN: string;
-	SPOTIFY_CLIENT_ID: string;
-	SPOTIFY_CLIENT_SECRET: string;
 	GALLERY_MCP_TOKEN: string;
 	R2_ACCESS_KEY_ID: string;
 	R2_SECRET_ACCESS_KEY: string;
@@ -39,7 +33,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "SUPABASE_URL" | "NOTION_VERSION" | "CF_ACCOUNT_ID" | "CF_STORE_ID" | "SUPABASE_SERVICE_ROLE_KEY" | "GMAIL_CLIENT_ID" | "GMAIL_CLIENT_SECRET" | "GMAIL_REFRESH_TOKEN" | "ENVIRONMENT" | "SPOTIFY_REFRESH_TOKEN" | "SPOTIFY_CLIENT_ID" | "SPOTIFY_CLIENT_SECRET" | "GALLERY_MCP_TOKEN" | "R2_ACCESS_KEY_ID" | "R2_SECRET_ACCESS_KEY" | "CF_SECRETS_STORE_TOKEN">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "SUPABASE_URL" | "NOTION_VERSION" | "CF_ACCOUNT_ID" | "CF_STORE_ID" | "SUPABASE_SERVICE_ROLE_KEY" | "ENVIRONMENT" | "GALLERY_MCP_TOKEN" | "R2_ACCESS_KEY_ID" | "R2_SECRET_ACCESS_KEY" | "CF_SECRETS_STORE_TOKEN">> {}
 }
 
 // Begin runtime types

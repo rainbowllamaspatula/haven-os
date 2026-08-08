@@ -3406,12 +3406,7 @@ export function FuseBox({ active }: { active: boolean }) {
                         The login page and the connector gate page — outside the theme by house
                         rule (auth stays untouched).
                       </li>
-                      <li>
-                        Post Box label & category dots — room content, pinned on purpose; the
-                        label roster is a future circuit.
-                      </li>
                       <li>Notion option pills — an external system's palette, kept recognisable.</li>
-                      <li>The email canvas stays white by design; link colour follows the theme.</li>
                     </ul>
                   </div>
                 </>

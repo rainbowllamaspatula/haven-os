@@ -18,7 +18,7 @@
  *   - Sections are fixed-order but collapsible, each with a LIVE summary line
  *     when collapsed; collapsed state remembered. Glance + vacuum never fold.
  *
- * Same room discipline as the Post Box: mounted in the stage with an `active`
+ * Same room discipline as the other rooms: mounted in the stage with an `active`
  * prop; fetches only while active; foreground-refresh + gentle poll; last-good
  * on a failed refresh — the panel never blanks.
  */

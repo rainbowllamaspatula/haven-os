@@ -15,7 +15,7 @@
  * The writes: each maps to one HA intent (HassTurnOn/Off, HassLightSet,
  * HassVacuum*, HassMedia*, HassSetVolume). All are explicit Elle-initiated
  * actions fired by the panel — nothing here runs on its own. Controls THROW on
- * failure (spotify.ts convention); the routes net them into a clean
+ * failure; the routes net them into a clean
  * { ok: false } so the panel never shows a fake success.
  */
 

@@ -49,8 +49,8 @@ import {
 	type UpdatePageInput,
 	type QueryInput,
 	type JournalInput,
+	createTask,
 } from "./notion-tools";
-import { createTask } from "./postbox";
 import { callMcpTool, haServer } from "./mcp";
 import { getSecret } from "./secrets";
 import { keyCapabilities } from "./key-health";
@@ -67,16 +67,6 @@ import {
 	type VacuumDef,
 	type WorkshopMappings,
 } from "./config";
-import {
-	nowPlayingText,
-	play,
-	pause,
-	nextTrack,
-	previousTrack,
-	searchSpotify,
-	queueTrack,
-	SEARCH_TYPES,
-} from "./spotify";
 
 // The taxonomy the enumerate tool offers, matching the `categories`/`types`
 // reference tables exactly. Exported since Fuse Box Phase 4: the memories
@@ -117,7 +107,7 @@ export type ToolExtras = {
  * the honest degradation is that a capability the house doesn't have simply
  * isn't offered, instead of being offered and failing.
  */
-export type Capability = "elevenlabs" | "getimg" | "ha" | "notion" | "spotify";
+export type Capability = "elevenlabs" | "getimg" | "ha" | "notion";
 export type CapabilityMap = Record<Capability, boolean>;
 
 /** An install with every key set — the pre-fork behaviour, and ours. */
@@ -126,7 +116,6 @@ export const ALL_CAPABILITIES: CapabilityMap = {
 	getimg: true,
 	ha: true,
 	notion: true,
-	spotify: true,
 };
 
 /**
@@ -157,7 +146,7 @@ export const REGISTRY: ToolEntry[] = [
 		definition: {
 			name: "search_tools",
 			description:
-				"Load a capability you don't currently hold. Domains that exist: the calendar; full memory rosters; Notion (search, read/create/update pages, query databases, journal entries, tasks); Spotify (now playing, play/pause/skip, search, queue); the house via Home Assistant (live state of lights/switches/sensors, turning things on and off, light settings, the vacuum); your voice (send {user} a voice note — your words, performed and playable in the thread); images (generate a real picture — you two, your home, a scene — into the thread and the Gallery; and view_gallery to SEE what's been made or check whether one finished). Mail lives in its own room, the Post Box, not here. Say plainly what you're trying to do; you'll get back the tools that can do it, then call the one you need.",
+				"Load a capability you don't currently hold. Domains that exist: the calendar; full memory rosters; Notion (search, read/create/update pages, query databases, journal entries, tasks); the house via Home Assistant (live state of lights/switches/sensors, turning things on and off, light settings, the vacuum); your voice (send {user} a voice note — your words, performed and playable in the thread); images (generate a real picture — you two, your home, a scene — into the thread and the Gallery; and view_gallery to SEE what's been made or check whether one finished). Say plainly what you're trying to do; you'll get back the tools that can do it, then call the one you need.",
 			input_schema: {
 				type: "object",
 				properties: {
@@ -446,7 +435,7 @@ export const REGISTRY: ToolEntry[] = [
 		definition: {
 			name: "create_task",
 			description:
-				"Add a real task row to {user}'s tasks list in Notion (the same write the Post Box uses). Give it an action-oriented title and a date (YYYY-MM-DD, {place}); time (HH:MM) makes it a timed task, otherwise all-day. Use when {user} asks you to remind her of something or add something to her list.",
+				"Add a real task row to {user}'s tasks list in Notion. Give it an action-oriented title and a date (YYYY-MM-DD, {place}); time (HH:MM) makes it a timed task, otherwise all-day. Use when {user} asks you to remind her of something or add something to her list.",
 			input_schema: {
 				type: "object",
 				properties: {
@@ -478,131 +467,6 @@ export const REGISTRY: ToolEntry[] = [
 			});
 			return ok(JSON.stringify({ action: "task_created", title, date, url: r.url }));
 		},
-	},
-
-	// ── Spotify (spotify.ts) — control only, never destroy ─────────────────────
-	{
-		resident: false,
-		blurb: "What's playing on Spotify right now — track, artist, playing/paused.",
-		keywords: [
-			"spotify", "music", "playing", "song", "track", "listening", "current",
-			"player",
-		],
-		definition: {
-			name: "spotify_now_playing",
-			description:
-				"What {user}'s Spotify is playing right now: track, artist, album, and whether it's playing or paused. Use when she asks what's on, what this song is, or before changing playback.",
-			input_schema: { type: "object", properties: {} },
-		},
-		execute: async (env, _supabase, _input) => ok(await nowPlayingText(env)),
-	},
-	{
-		resident: false,
-		blurb: "Play music on Spotify — resume, or start a specific track/album/playlist by uri.",
-		keywords: [
-			"spotify", "music", "play", "resume", "start", "song", "track",
-			"album", "playlist", "listen", "put",
-		],
-		definition: {
-			name: "spotify_play",
-			description:
-				"Start or resume Spotify playback on {user}'s active device. No uri = resume what was playing. A track uri (spotify:track:…) plays that track; an album/playlist/artist uri plays that context. Get uris from spotify_search. Needs Spotify open on a device.",
-			input_schema: {
-				type: "object",
-				properties: {
-					uri: {
-						type: "string",
-						description: "Optional spotify: uri — track, album, playlist, or artist.",
-					},
-				},
-			},
-		},
-		execute: async (env, _supabase, input) =>
-			ok(await play(env, typeof input.uri === "string" ? input.uri : undefined)),
-	},
-	{
-		resident: false,
-		blurb: "Pause Spotify playback.",
-		keywords: ["spotify", "music", "pause", "stop", "quiet", "silence"],
-		definition: {
-			name: "spotify_pause",
-			description: "Pause {user}'s Spotify playback.",
-			input_schema: { type: "object", properties: {} },
-		},
-		execute: async (env, _supabase, _input) => ok(await pause(env)),
-	},
-	{
-		resident: false,
-		blurb: "Skip to the next track on Spotify.",
-		keywords: ["spotify", "music", "next", "skip", "song", "track", "forward"],
-		definition: {
-			name: "spotify_next",
-			description: "Skip {user}'s Spotify to the next track.",
-			input_schema: { type: "object", properties: {} },
-		},
-		execute: async (env, _supabase, _input) => ok(await nextTrack(env)),
-	},
-	{
-		resident: false,
-		blurb: "Go back to the previous track on Spotify.",
-		keywords: ["spotify", "music", "previous", "back", "replay", "song", "track"],
-		definition: {
-			name: "spotify_previous",
-			description: "Take {user}'s Spotify back to the previous track.",
-			input_schema: { type: "object", properties: {} },
-		},
-		execute: async (env, _supabase, _input) => ok(await previousTrack(env)),
-	},
-	{
-		resident: false,
-		blurb: "Search Spotify for tracks, albums, artists, or playlists — returns uris to play/queue.",
-		keywords: [
-			"spotify", "music", "search", "find", "song", "track", "album",
-			"artist", "playlist", "band",
-		],
-		definition: {
-			name: "spotify_search",
-			description:
-				"Search Spotify. Returns the top matches with the uris spotify_play and spotify_queue need. type defaults to track.",
-			input_schema: {
-				type: "object",
-				properties: {
-					query: { type: "string", description: "What to search for." },
-					type: {
-						type: "string",
-						enum: SEARCH_TYPES,
-						description: "What kind of result. Default: track.",
-					},
-				},
-				required: ["query"],
-			},
-		},
-		execute: async (env, _supabase, input) =>
-			ok(
-				await searchSpotify(
-					env,
-					String(input.query ?? ""),
-					typeof input.type === "string" ? input.type : undefined,
-				),
-			),
-	},
-	{
-		resident: false,
-		blurb: "Add a track to the Spotify queue (plays after the current song).",
-		keywords: ["spotify", "music", "queue", "add", "song", "track", "after"],
-		definition: {
-			name: "spotify_queue",
-			description:
-				"Add one track to {user}'s Spotify queue — it plays after the current song rather than interrupting it. Takes a track uri (spotify:track:…) from spotify_search.",
-			input_schema: {
-				type: "object",
-				properties: {
-					uri: { type: "string", description: "The track uri to queue." },
-				},
-				required: ["uri"],
-			},
-		},
-		execute: async (env, _supabase, input) => ok(await queueTrack(env, String(input.uri ?? ""))),
 	},
 
 	// ── Home Assistant (mcp.ts rail → the official HA MCP Server) ──────────────
@@ -951,8 +815,6 @@ export async function buildToolContext(
 			getimg: keys.GETIMG_API_KEY,
 			ha: keys.HA_MCP_URL && keys.HA_TOKEN,
 			notion: keys.NOTION_TOKEN,
-			// Spotify rides classic Wrangler secrets (OAuth triplet), not the store.
-			spotify: Boolean(env.SPOTIFY_CLIENT_ID && env.SPOTIFY_CLIENT_SECRET && env.SPOTIFY_REFRESH_TOKEN),
 		},
 		vacuums,
 		mappings,
@@ -961,7 +823,6 @@ export async function buildToolContext(
 
 /** Which capability group a tool needs, by name — central, no per-entry field. */
 export function requiredCapability(name: string): Capability | null {
-	if (name.startsWith("spotify_")) return "spotify";
 	if (name.startsWith("ha_")) return "ha";
 	if (name.startsWith("notion_") || name === "write_journal_entry" || name === "create_task") {
 		return "notion";
@@ -1281,8 +1142,8 @@ type MemoryJudgment = {
 
 /**
  * The merge decision the embedding only NOMINATES. A cheap, separate Haiku call
- * (NOT the Front Room brain — same lightweight pattern as the Post Box title
- * suggester) decides whether a nominated twin is truly the same fact, and if so
+ * (NOT the Front Room brain — its own small, single-purpose request)
+ * decides whether a nominated twin is truly the same fact, and if so
  * reconciles old + new into the current truth rather than overwriting. Model-
  * agnostic: this holds whatever embedder we run. Throws on any failure so the
  * caller falls back to INSERT — a confirm failure can never touch an existing row.

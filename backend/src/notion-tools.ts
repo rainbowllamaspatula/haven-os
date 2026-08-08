@@ -460,3 +460,45 @@ export async function writeJournalEntry(env: Env, input: JournalInput): Promise<
 	const page = (await notionFetch(env, "pages", { method: "POST", body })) as LoosePage;
 	return JSON.stringify({ action: "journal_entry_created", title: entry, url: page.url });
 }
+
+// ── create_task — a real row in the tasks data source ───────────────────────
+// Moved here from the retired Post Box module (Haven sweep): the brain's
+// create_task tool is a plain Notion write and owes Gmail nothing. Mapped to
+// the tasks schema: Task title, Assigned + Due both set to the same picked
+// value (timed → both carry the time, all-day otherwise), Category select,
+// High Priority checkbox, Status = Not started. The tasks data source id
+// lives in workshop.mappings config — loaded at the create site.
+export type TaskInput = {
+	title: string;
+	date: string; // YYYY-MM-DD ({place}), resolved by the model from the ask
+	time: string | null; // HH:MM ({place}) or null for all-day
+	category: string | null;
+	highPriority: boolean;
+};
+
+export async function createTask(env: Env, t: TaskInput): Promise<{ url: string }> {
+	// Perth is UTC+8, no DST — a fixed offset is exact. A time → datetime (Notion
+	// infers is_datetime from the presence of a clock time); no time → all-day.
+	const start = t.time ? `${t.date}T${t.time}:00+08:00` : t.date;
+
+	const properties: Record<string, unknown> = {
+		Task: { title: [{ text: { content: t.title } }] },
+		"Assigned Date": { date: { start } },
+		"Due Date": { date: { start } },
+		"High Priority": { checkbox: t.highPriority },
+		Status: { status: { name: "Not started" } },
+	};
+	if (t.category) properties.Category = { select: { name: t.category } };
+
+	const page = (await notionFetch(env, "pages", {
+		method: "POST",
+		body: {
+			parent: {
+				type: "data_source_id",
+				data_source_id: (await loadWorkshopMappings(env)).tasks_ds,
+			},
+			properties,
+		},
+	})) as { url: string };
+	return { url: page.url };
+}

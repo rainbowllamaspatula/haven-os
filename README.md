@@ -55,9 +55,9 @@ You run it on your own accounts. Your keys, your bill, your canon.
 - **Memory writes without the OpenRouter key are refused, not degraded** — the
   house never stores a memory it can't embed (retrieval integrity beats
   convenience).
-- **Dormant rooms** (Post Box, Listening Room, and other future rooms) ship in
-  the code but sit inert in the drawer. Updates arrive as pull requests you
-  merge; merging deploys.
+- **Future rooms** arrive as pull requests you merge; merging deploys. Only
+  rooms that actually exist in Haven ship — nothing sits in the drawer as an
+  empty promise.
 - **Internal identifiers:** a few database enums use the slugs `elle`/`jay`
   (user/companion roles) and `vosjay`/`chatjay` (image-door sources). They are
   stable internal identifiers from the source house — every visible surface

@@ -1,6 +1,6 @@
-# Vale OS — Agent Guardrails
+# Haven OS — Agent Guardrails
 
-Vale OS is a private, single-user AI companion app. One git repo, two halves:
+Haven OS is a private, single-user AI companion app. One git repo, two halves:
 
 - `frontend/` — Vite + React + TypeScript. The PWA.
 - `backend/` — one Cloudflare Worker. Serves the built frontend as static assets **and** the API under `/api/*`. Single origin. (For Cloudflare Workers specifics, see `backend/AGENTS.md`.)
@@ -9,7 +9,7 @@ Read the task brief before starting. If a change would touch anything under "Do 
 
 ## Do not touch without being explicitly asked
 
-- **The brain** — prompt assembly (`backend/src/prompt.ts`), the static core (`backend/src/static-core.ts`), memory, and the Anthropic API wiring.
+- **The brain** — prompt assembly (`backend/src/prompt.ts`), the stored prompt core (config in the database, edited from the Fuse Box), memory, and the Anthropic API wiring.
 - **Auth** — the password gate and session handling (`backend/src/auth.ts`). Respect it; do not modify it.
 
 ## Hard rules

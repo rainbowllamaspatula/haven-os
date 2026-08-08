@@ -95,21 +95,6 @@ export const COLOR_SLOTS: ColorSlot[] = [
 	{ key: "teal-ink", label: "Ink on primary", group: "Accent derivatives", neutral: { dark: "#0F1B1C", light: "#FFFFFF" } },
 	{ key: "bronze-ink", label: "Ink on warm accent", group: "Accent derivatives", neutral: { dark: "#1B1712", light: "#FFFFFF" } },
 	{ key: "pure", label: "Pure (knobs, play glyph)", group: "Accent derivatives", neutral: { dark: "#FFFFFF", light: "#FFFFFF" } },
-	// Gradients — the Listening Room's six playlist placeholders (a/b stops).
-	// Hand-tuned pairs in VDS (not a uniform darken), so they are honest slots,
-	// not derivations the engine could fake without failing the golden test.
-	{ key: "grad1a", label: "Gradient 1 — start", group: "Gradients", neutral: { dark: "#B05252", light: "#B05252" } },
-	{ key: "grad1b", label: "Gradient 1 — end", group: "Gradients", neutral: { dark: "#6E3333", light: "#6E3333" } },
-	{ key: "grad2a", label: "Gradient 2 — start", group: "Gradients", neutral: { dark: "#52797C", light: "#52797C" } },
-	{ key: "grad2b", label: "Gradient 2 — end", group: "Gradients", neutral: { dark: "#32494B", light: "#32494B" } },
-	{ key: "grad3a", label: "Gradient 3 — start", group: "Gradients", neutral: { dark: "#9C9082", light: "#9C9082" } },
-	{ key: "grad3b", label: "Gradient 3 — end", group: "Gradients", neutral: { dark: "#5A5349", light: "#5A5349" } },
-	{ key: "grad4a", label: "Gradient 4 — start", group: "Gradients", neutral: { dark: "#97A39C", light: "#97A39C" } },
-	{ key: "grad4b", label: "Gradient 4 — end", group: "Gradients", neutral: { dark: "#4E5854", light: "#4E5854" } },
-	{ key: "grad5a", label: "Gradient 5 — start", group: "Gradients", neutral: { dark: "#C99A56", light: "#C99A56" } },
-	{ key: "grad5b", label: "Gradient 5 — end", group: "Gradients", neutral: { dark: "#6E5530", light: "#6E5530" } },
-	{ key: "grad6a", label: "Gradient 6 — start", group: "Gradients", neutral: { dark: "#5B6F8A", light: "#5B6F8A" } },
-	{ key: "grad6b", label: "Gradient 6 — end", group: "Gradients", neutral: { dark: "#2C3949", light: "#2C3949" } },
 ];
 
 const COLOR_SLOT_KEYS = new Set(COLOR_SLOTS.map((s) => s.key));

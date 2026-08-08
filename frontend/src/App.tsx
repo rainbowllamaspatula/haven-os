@@ -2,9 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
-import { PostBox } from './PostBox';
 import { Hearth } from './Hearth';
-import { ListeningRoom } from './ListeningRoom';
 import { Gallery } from './Gallery';
 import { FuseBox } from './FuseBox';
 import { api, apiUrl } from './api';
@@ -49,8 +47,7 @@ const MOOD_IDS = [
 
 // The Workshop's three tools, all wired — their card subtitles show live data,
 // computed in the render. Each `sub` is a neutral fallback shown only until that
-// tool's live data loads — never an invented number. (Mail retired into the Post
-// Box room when that shipped — a full Gmail client deserves a room, not a tile.)
+// tool's live data loads — never an invented number.
 const WORKSHOP_TOOLS = [
   { name: 'Notion', icon: 'ti-notebook', sub: 'Recent & search' },
   { name: 'Calendar', icon: 'ti-calendar', sub: '' },
@@ -102,8 +99,6 @@ type Readiness = {
   ha: boolean;
   notion: boolean;
   openrouter: boolean;
-  spotify: boolean;
-  gmail: boolean;
   hearth_rosters: boolean;
   workshop_mappings: boolean;
 };
@@ -759,8 +754,6 @@ function wtileSpine(def: WorkshopBlockDef | undefined, source: string): string {
   return `wtile__spine--${WTILE_ACCENTS.has(accent) ? accent : 'muted'}`;
 }
 
-// (Workshop Mail helpers retired — the Post Box owns Gmail now.)
-
 // ── Voice notes — the compact in-bubble player ───────────────────────────────
 // Streams from the session-gated /api/voice/{key} route (never a public URL).
 // Custom controls in Vale Design System styling — no native <audio controls>
@@ -899,15 +892,6 @@ function App() {
     temp: number;
     condition: string;
     place: string | null;
-  } | null>(null);
-  // The ambient "playing" tile — Spotify's current track. null until the first
-  // fetch lands; kept as last-good across a failed refresh — never blanked.
-  // track === null with a loaded state means genuinely idle (nothing playing),
-  // which renders quietly, not as an error.
-  const [nowPlaying, setNowPlaying] = useState<{
-    playing: boolean;
-    track: string | null;
-    artist: string | null;
   } | null>(null);
   // The Workshop calendar tool's agenda. null = loading; agendaError tells a
   // failed fetch apart from a genuinely empty calendar.
@@ -1141,11 +1125,10 @@ function App() {
     if (!isDesktop && activeRoom === 'fusebox') setActiveRoom('front_room');
   }, [isDesktop, activeRoom]);
 
-  // Deep-link: a mail-notification tap opens /?room=post_box — land there on
-  // load so clicking a push drops Elle straight into the Post Box.
+  // Deep-link: /?room=<name> lands on that room on load.
   useEffect(() => {
     const room = new URLSearchParams(window.location.search).get('room');
-    if (room === 'post_box' || room === 'hearth' || room === 'listening_room' || room === 'gallery') {
+    if (room === 'hearth' || room === 'gallery') {
       setActiveRoom(room);
     }
     // The Fuse Box deep-link honours the desktop gate: below lg it's refused,
@@ -1200,8 +1183,8 @@ function App() {
   }, []);
 
   // ── The ambient bar, one wake per tick ──────────────────────────────────────
-  // One 30s useVisiblePoll against GET /api/ambient replaces the four separate
-  // fetch loops the tiles used to run (next 5m / weather 15m / spotify 30s /
+  // One 30s useVisiblePoll against GET /api/ambient replaces the separate
+  // fetch loops the tiles used to run (next 5m / weather 15m /
   // mood on-load+foreground). The Worker's per-source caches make the fast
   // cadence free for the slow sources, and the phone radio wakes ONCE per tick
   // instead of three times. Fields are per-source null on failure, so every tile
@@ -1235,8 +1218,6 @@ function App() {
           place: place ?? res.weather.place ?? prev?.place ?? null,
         }));
       }
-
-      if (res.nowPlaying) setNowPlaying(res.nowPlaying);
 
       // Mood rides along — but never clobbers a tap (see moodTouchedAt above).
       if (res.mood && Date.now() - moodTouchedAt.current > 10_000) {
@@ -1862,18 +1843,6 @@ function App() {
           <div className="ambient__body">
             <div className="tile">
               <span className="tile__label">
-                <i className="ti ti-music" aria-hidden="true" /> playing
-              </span>
-              <span className="tile__value">
-                {nowPlaying?.track
-                  ? `${[nowPlaying.track, nowPlaying.artist]
-                      .filter(Boolean)
-                      .join(' — ')}${nowPlaying.playing ? '' : ' (paused)'}`
-                  : 'Nothing playing'}
-              </span>
-            </div>
-            <div className="tile">
-              <span className="tile__label">
                 <i className="ti ti-calendar" aria-hidden="true" /> next
               </span>
               <span className="tile__value tile__value--next">
@@ -2338,23 +2307,6 @@ function App() {
             )}
           </div>
         </div>
-        {/* Post Box — the mail room. Mounted alongside the others so its
-            state survives a trip to another room and back. */}
-        <div
-          className={`room-view ${activeRoom === 'post_box' ? 'room-view--on' : ''}`}
-        >
-          {readiness && !readiness.gmail ? (
-            <RoomNeeds
-              icon="ti-mail"
-              room="The Post Box"
-              needs="the Gmail OAuth secrets (client id, secret, refresh token — set at deploy time)"
-              circuit="Keys (see the README's Gmail section)"
-              onOpenFuseBox={null}
-            />
-          ) : (
-            <PostBox active={activeRoom === 'post_box'} />
-          )}
-        </div>
         {/* The Hearth — home control. Mounted alongside the others so its
             state (collapsed sections, last-good house read) survives a trip
             to another room and back. */}
@@ -2373,23 +2325,6 @@ function App() {
             <Hearth active={activeRoom === 'hearth'} />
           )}
         </div>
-        {/* The Listening Room — the music room, native on spotify.ts. */}
-        <div
-          className={`room-view ${activeRoom === 'listening_room' ? 'room-view--on' : ''}`}
-        >
-          {readiness && !readiness.spotify ? (
-            <RoomNeeds
-              icon="ti-headphones"
-              room="The Listening Room"
-              needs="the Spotify OAuth secrets (client id, secret, refresh token — set at deploy time)"
-              circuit="Keys (see the README's Spotify section)"
-              onOpenFuseBox={null}
-            />
-          ) : (
-            <ListeningRoom active={activeRoom === 'listening_room'} />
-          )}
-        </div>
-
         {/* The Gallery — pretty pictures, one pipeline, three doors. */}
         <div className={`room-view ${activeRoom === 'gallery' ? 'room-view--on' : ''}`}>
           {readiness && !readiness.getimg ? (

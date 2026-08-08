@@ -17,7 +17,7 @@
  *
  * Wrangler-resident secrets (the locks and the plumbing: VALE_PASSWORD,
  * SESSION_SECRET, GALLERY_MCP_TOKEN, SUPABASE_SERVICE_ROLE_KEY, R2 creds,
- * Gmail/Spotify, CF_SECRETS_STORE_TOKEN) stay plain env strings and do NOT
+ * CF_SECRETS_STORE_TOKEN) stay plain env strings and do NOT
  * come through here — per the inbound-credential rule, the Fuse Box never
  * manages a lock, so a lock never lives in the store.
  */

@@ -31,27 +31,6 @@ interface Env {
 	 */
 	NOTION_VERSION: string;
 	/**
-	 * Gmail OAuth (read-only) for the Workshop Mail tool. The Worker exchanges
-	 * the long-lived refresh token for short-lived access tokens. All secrets —
-	 * set them with `wrangler secret put`:
-	 *   GMAIL_CLIENT_ID · GMAIL_CLIENT_SECRET · GMAIL_REFRESH_TOKEN
-	 * The refresh token must come from an OAuth app published to Production (a
-	 * Testing-mode token expires after 7 days for Gmail scopes).
-	 */
-	GMAIL_CLIENT_ID: string;
-	GMAIL_CLIENT_SECRET: string;
-	GMAIL_REFRESH_TOKEN: string;
-	/**
-	 * Spotify OAuth for the brain's playback control + the now-playing tile.
-	 * Reuses the app (and scopes) behind Elle's existing Spotify MCP — the
-	 * refresh token comes from ~/.spotify-mcp/tokens.json, the client id/secret
-	 * from that project's .env. All secrets — set with `wrangler secret put`:
-	 *   SPOTIFY_CLIENT_ID · SPOTIFY_CLIENT_SECRET · SPOTIFY_REFRESH_TOKEN
-	 */
-	SPOTIFY_CLIENT_ID: string;
-	SPOTIFY_CLIENT_SECRET: string;
-	SPOTIFY_REFRESH_TOKEN: string;
-	/**
 	 * Voice-note audio bucket (see wrangler.jsonc r2_buckets). Declared here so
 	 * the type exists before the next `wrangler types` regen; the generated
 	 * declaration is identical, so the merge stays clean.

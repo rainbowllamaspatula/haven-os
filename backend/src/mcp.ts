@@ -12,8 +12,8 @@
  * warranted) passenger; its curated entries live in tools.ts. Attaching
  * another server later is a new config + curated entries — never a new client.
  *
- * Error contract — this module NEVER throws (unlike spotify.ts, whose throws
- * runTool nets): transport failures, auth rejections, JSON-RPC errors and MCP
+ * Error contract — this module NEVER throws (unlike the native modules, whose
+ * throws runTool nets): transport failures, auth rejections, JSON-RPC errors and MCP
  * tool errors all fold into { content, is_error: true }, so a dead endpoint or
  * a bad token can't cost Jay a reply.
  *
@@ -64,8 +64,8 @@ const PROTOCOL_VERSION = "2025-06-18";
 
 type Session = { sessionId: string | null; protocolVersion: string };
 
-// Handshake cache, keyed by server URL, per isolate — same lifetime and
-// pattern as spotify.ts's token cache.
+// Handshake cache, keyed by server URL, per isolate — lives as long as the
+// isolate does.
 const sessions = new Map<string, Session>();
 // Single-flight for the handshake: concurrent cold calls share one initialize
 // rather than each running its own.

@@ -56,7 +56,7 @@ const BARE_CTX: ToolResolutionContext = {
 		companion_role: "companion",
 		timezone: "UTC",
 	},
-	caps: { elevenlabs: false, getimg: false, ha: false, notion: false, spotify: false },
+	caps: { elevenlabs: false, getimg: false, ha: false, notion: false },
 	vacuums: null,
 	mappings: null,
 };
@@ -110,7 +110,6 @@ describe("resolveDefinitions", () => {
 
 describe("capability gating", () => {
 	it("maps tool names to their capability groups", () => {
-		expect(requiredCapability("spotify_play")).toBe("spotify");
 		expect(requiredCapability("ha_vacuum_start")).toBe("ha");
 		expect(requiredCapability("notion_search")).toBe("notion");
 		expect(requiredCapability("write_journal_entry")).toBe("notion");
@@ -123,10 +122,10 @@ describe("capability gating", () => {
 	});
 
 	it("searchTools never offers a capability the house doesn't hold", () => {
-		const bare = searchTools("play some music on spotify", BARE_CTX);
-		expect(bare).toHaveLength(0);
-		const ours = searchTools("play some music on spotify", OUR_CTX);
-		expect(ours.some((e) => e.definition.name === "spotify_play")).toBe(true);
+		const bare = searchTools("send Robo to clean the hallway", BARE_CTX);
+		expect(bare.some((e) => e.definition.name === "ha_vacuum_clean_area")).toBe(false);
+		const ours = searchTools("send Robo to clean the hallway", OUR_CTX);
+		expect(ours.some((e) => e.definition.name === "ha_vacuum_clean_area")).toBe(true);
 	});
 
 	it("a roster name in the need still finds the vacuum tools (resolved match surface)", () => {

@@ -1,7 +1,7 @@
 /**
  * Vale OS — one fetch discipline for every upstream call.
  *
- * Before this, only mcp.ts set a timeout; a hung Gmail/Notion/Spotify/Anthropic
+ * Before this, only mcp.ts set a timeout; a hung Notion/Anthropic
  * socket could hang the whole reply, and a 429 was an unhandled failure. This
  * wraps `fetch` with:
  *   - a per-service timeout via AbortSignal.timeout (a slow upstream fails plainly
@@ -17,10 +17,7 @@
 // everything else should feel snappy or fail. Unlisted services take the default.
 const TIMEOUTS: Record<string, number> = {
 	anthropic: 60_000,
-	gmail: 15_000,
-	google: 15_000,
 	notion: 15_000,
-	spotify: 15_000,
 	ha: 15_000,
 	openmeteo: 15_000,
 	openrouter: 15_000,
