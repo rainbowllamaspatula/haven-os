@@ -46,6 +46,9 @@ You run it on your own accounts. Your keys, your bill, your canon.
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/rainbowllamaspatula/haven-os)
 
+**New here? Follow the [install guide](https://haven-os-docs.pages.dev)** — every
+step illustrated, about an hour, no terminal required.
+
 ## Honest requirements & limits
 
 - **Single-user by design.** One password, one person, one companion. There is
