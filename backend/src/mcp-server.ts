@@ -22,6 +22,23 @@
 import { createClient } from "@supabase/supabase-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { passwordMatches } from "./auth";
+import {
+	loadIdentityProfile,
+	resolveIdentityText,
+	NEUTRAL_PROFILE,
+	type IdentityProfile,
+} from "./identity";
+
+// The configured names for this surface's visible strings (the authorize page,
+// the tool descriptions). Best-effort: a DB blip falls back to the neutral
+// profile rather than costing the handshake — names are dressing, not a gate.
+async function profileOf(env: Env): Promise<IdentityProfile> {
+	try {
+		return await loadIdentityProfile(env);
+	} catch {
+		return NEUTRAL_PROFILE;
+	}
+}
 
 // ── OAuth 2.1 for the connector (claude.ai offers no bearer field) ───────────
 // A deliberately tiny, single-user, storage-free authorization server on the
@@ -100,15 +117,16 @@ async function pkceChallengeFromVerifier(verifier: string): Promise<string> {
 }
 
 /** The one-field authorize page: the house password, VDS-flavoured, self-contained. */
-function authorizePage(params: URLSearchParams, error?: string): Response {
+function authorizePage(params: URLSearchParams, profile: IdentityProfile, error?: string): Response {
 	const esc = (s: string) =>
 		s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+	const house = esc(profile.house_name);
 	const hidden = ["client_id", "redirect_uri", "state", "code_challenge", "code_challenge_method", "response_type", "scope"]
 		.map((k) => `<input type="hidden" name="${k}" value="${esc(params.get(k) ?? "")}">`)
 		.join("");
 	return new Response(
 		`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Vale OS — connect</title>
+<title>${house} — connect</title>
 <style>body{background:#0F1717;color:#F4F3F1;font-family:Inter,system-ui,sans-serif;display:grid;place-items:center;min-height:100dvh;margin:0}
 form{background:#1A2424;border:1px solid #3A4D4D;border-radius:14px;padding:28px;width:min(340px,90vw)}
 h1{font-family:Fraunces,Georgia,serif;font-weight:500;font-size:20px;margin:0 0 6px}
@@ -119,10 +137,10 @@ button{width:100%;margin-top:12px;background:#1B7B7E;border:none;border-radius:9
 .err{color:#C44545;font-size:12.5px;margin-top:10px}</style>
 <form method="post">
 <h1>Connect to the Gallery</h1>
-<p>Claude is asking for the Vale OS Gallery. The house password lets it in.</p>
+<p>Claude is asking for ${house}'s Gallery. The house password lets it in.</p>
 ${hidden}
 <input type="password" name="password" placeholder="house password" autofocus autocomplete="current-password">
-<button>Let him in</button>
+<button>Open the door</button>
 ${error ? `<div class="err">${esc(error)}</div>` : ""}
 </form>`,
 		{ status: error ? 401 : 200, headers: { "Content-Type": "text/html; charset=utf-8" } },
@@ -196,7 +214,7 @@ export async function handleOAuth(request: Request, env: Env): Promise<Response>
 		if (params.get("response_type") !== "code" || !challenge || params.get("code_challenge_method") !== "S256") {
 			return new Response("authorization_code with S256 PKCE required", { status: 400 });
 		}
-		if (request.method === "GET") return authorizePage(params);
+		if (request.method === "GET") return authorizePage(params, await profileOf(env));
 
 		// POST — the house password is the whole identity check (single-user house).
 		// Guarded on the env secret existing: without it, passwordMatches would be
@@ -208,7 +226,7 @@ export async function handleOAuth(request: Request, env: Env): Promise<Response>
 			});
 		}
 		if (!passwordMatches(params.get("password") ?? "", env.VALE_PASSWORD)) {
-			return authorizePage(params, "That's not the house password.");
+			return authorizePage(params, await profileOf(env), "That's not the house password.");
 		}
 		const code = await mintToken(env, {
 			t: "code",
@@ -291,11 +309,14 @@ const toolText = (text: string, isError = false) => ({
 	...(isError ? { isError: true } : {}),
 });
 
+// Tool descriptions are template vocabulary ({house}/{companion}/{user}, the
+// registry convention from tools.ts) — resolved against the configured
+// identity at tools/list time, never served raw.
 const TOOLS = [
 	{
 		name: "generate_image",
 		description:
-			"Generate an image in the Vale OS Gallery (getimg, Nano Banana 2). Give it your intent — what you want a picture of — and the house render pass writes the final prompt, weaving in Jay & Elle's canon references (their faces, their rooms) and wardrobe rules. The image lands in the shared Gallery, source 'chatjay'. Generation takes ~30s: the result returns a pending id — check list_recent_images for completion.",
+			"Generate an image in {house}'s Gallery (getimg, Nano Banana 2). Give it your intent — what you want a picture of — and the house render pass writes the final prompt, weaving in {companion} & {user}'s canon references (their faces, their rooms) and wardrobe rules. The image lands in the shared Gallery, source 'chatjay'. Generation takes ~30s: the result returns a pending id — check list_recent_images for completion.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -495,8 +516,15 @@ export async function handleMcp(
 			});
 		case "ping":
 			return rpcResult(id, {});
-		case "tools/list":
-			return rpcResult(id, { tools: TOOLS });
+		case "tools/list": {
+			const profile = await profileOf(env);
+			return rpcResult(id, {
+				tools: TOOLS.map((t) => ({
+					...t,
+					description: resolveIdentityText(t.description, profile),
+				})),
+			});
+		}
 		case "tools/call": {
 			const name = String(rpc.params?.name ?? "");
 			const args = (rpc.params?.arguments ?? {}) as Record<string, unknown>;
