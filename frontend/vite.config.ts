@@ -42,8 +42,8 @@ export default defineConfig({
         // at build time, so these are deploy-bound — a themed install's
         // splash/status wear these until the next deploy. Listed honestly in
         // the Décor circuit's panel notes.
-        theme_color: '#141618',
-        background_color: '#1D2022',
+        theme_color: '#12100E',
+        background_color: '#1E1A16',
         icons: [
           { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },

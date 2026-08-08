@@ -5,9 +5,18 @@ import { createRoot } from 'react-dom/client'
 // network. Latin subsets only — covers English and German. This is the Décor
 // circuit's CURATED font list: every family a theme may pick must be bundled
 // here (a Google Fonts link would punch a hole in the CDN-free shell).
-// Atkinson Hyperlegible is Haven's body face; it ships 400/700 only — the
-// browser synthesises the app's 500/600 weights, which is acceptable for a
+// Newsreader / IBM Plex Sans / IBM Plex Mono are Lantern, the shipped
+// default. Atkinson Hyperlegible ships 400/700 only — the browser
+// synthesises the app's 500/600 weights, which is acceptable for a
 // hyperlegibility-first face.
+import '@fontsource/newsreader/latin-400.css'
+import '@fontsource/newsreader/latin-500.css'
+import '@fontsource/newsreader/latin-600.css'
+import '@fontsource/ibm-plex-sans/latin-400.css'
+import '@fontsource/ibm-plex-sans/latin-500.css'
+import '@fontsource/ibm-plex-sans/latin-600.css'
+import '@fontsource/ibm-plex-mono/latin-400.css'
+import '@fontsource/ibm-plex-mono/latin-500.css'
 import '@fontsource/fraunces/latin-400.css'
 import '@fontsource/fraunces/latin-500.css'
 import '@fontsource/fraunces/latin-600.css'

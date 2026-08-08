@@ -2,8 +2,8 @@
  * The Décor circuit — the theme engine (19 Jul 2026 brief).
  *
  * The design system is CANON, and canon lives in the database: the repo
- * compiles in a deliberately neutral default (a primed wall, nobody's
- * colours), and the house's actual aesthetic is a decor_theme_versions row
+ * compiles in Haven's own default — Lantern (8 Aug 2026), dark-first, amber
+ * only on things you can press — and the house's actual aesthetic is a decor_theme_versions row
  * — token map in, CSS custom properties out, injected into the shell at
  * serve time and re-applied live by the client. No VDS value survives in
  * app code; the VDS theme is data entered through the Fuse Box.
@@ -12,9 +12,9 @@
  *  - Per-request, never cached in module scope — a panel edit is live on
  *    the next call.
  *  - A bad paste must never brick the walls: reads SANITIZE (drop invalid
- *    entries, fall back to neutral per slot); writes VALIDATE LOUDLY
- *    (reject the save, name the slot). Zero themes is a legal state, not
- *    an error — that is the virgin-install / Haven-day-one look.
+ *    entries, fall back to the compiled default per slot); writes VALIDATE
+ *    LOUDLY (reject the save, name the slot). Zero themes is a legal state,
+ *    not an error — that is the virgin install, wearing Lantern.
  *
  * Both modes ship per theme. The app wears the DARK values today (it has
  * been dark-only since the 30 May mockup — the light block is emitted
@@ -29,12 +29,15 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 // imports @fontsource woff2s; a Google Fonts link would punch a hole in the
 // no-network shell). The brief's minimum set: VDS's three + Haven's body face.
 export const FONT_STACKS: Record<string, string> = {
+	// Lantern's three — the shipped default (8 Aug 2026 brief).
+	newsreader: "Newsreader, Georgia, 'Times New Roman', serif",
+	"ibm-plex-sans": "'IBM Plex Sans', system-ui, -apple-system, sans-serif",
+	"ibm-plex-mono": "'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace",
 	fraunces: "'Fraunces', Georgia, serif",
 	inter: "'Inter', system-ui, sans-serif",
 	"jetbrains-mono": "'JetBrains Mono', monospace",
 	"atkinson-hyperlegible": "'Atkinson Hyperlegible', system-ui, sans-serif",
-	// The system trio — the neutral default's "standard system-adjacent type
-	// until themed", and an honest pick for a themeless install.
+	// The system trio — an honest pick for a house that wants no bundled face.
 	"system-sans": "system-ui, -apple-system, sans-serif",
 	"system-serif": "Georgia, 'Times New Roman', serif",
 	"system-mono": "ui-monospace, Consolas, monospace",
@@ -43,9 +46,9 @@ export const FONT_KEYS = Object.keys(FONT_STACKS);
 
 export type FontSlotKey = "disp" | "body" | "mono";
 export const FONT_SLOTS: Array<{ key: FontSlotKey; label: string; neutral: string }> = [
-	{ key: "disp", label: "Display", neutral: "system-serif" },
-	{ key: "body", label: "Body", neutral: "system-sans" },
-	{ key: "mono", label: "Mono", neutral: "system-mono" },
+	{ key: "disp", label: "Display", neutral: "newsreader" },
+	{ key: "body", label: "Body", neutral: "ibm-plex-sans" },
+	{ key: "mono", label: "Mono", neutral: "ibm-plex-mono" },
 ];
 
 // ── The colour slot registry ─────────────────────────────────────────────────
@@ -56,9 +59,14 @@ export const FONT_SLOTS: Array<{ key: FontSlotKey; label: string; neutral: strin
 // teal may hold any colour, exactly as a Workshop accent named teal already
 // can. Renaming them would break live rows; the label column is for humans.
 //
-// The neutral values are the compiled-in default: warm greys, near-black
-// warm ink, one restrained slate-teal accent that reads as nobody's.
-// Pleasant, legible, deliberately unmemorable — a primed wall.
+// The neutral values are the compiled-in default: LANTERN (8 Aug 2026 brief),
+// Haven's own identity. Dark-first — warm near-black night, amber that is
+// only ever something you can press, dusk for anything that merely informs.
+// The slot named "teal" wears lantern amber and the slot named "amber" wears
+// brass — the keys are identifiers, not descriptions (see the teal ruling).
+// Values come from the Lantern tokens file; tx2 and bronze-100 are derived
+// midpoints (wick↔smoke) because Lantern's palette has two text steps where
+// Haven's slot set has three.
 export type ColorSlot = {
 	key: string;
 	label: string;
@@ -68,33 +76,41 @@ export type ColorSlot = {
 
 export const COLOR_SLOTS: ColorSlot[] = [
 	// Surfaces
-	{ key: "bg", label: "App background", group: "Surfaces", neutral: { dark: "#141618", light: "#FAFAF9" } },
-	{ key: "surface", label: "Chrome / header", group: "Surfaces", neutral: { dark: "#1D2022", light: "#FFFFFF" } },
-	{ key: "surface-2", label: "Raised cards", group: "Surfaces", neutral: { dark: "#272B2D", light: "#F0EFED" } },
+	{ key: "bg", label: "App background", group: "Surfaces", neutral: { dark: "#12100E", light: "#FAF4E9" } },
+	{ key: "surface", label: "Chrome / header", group: "Surfaces", neutral: { dark: "#1E1A16", light: "#FFFDF8" } },
+	// Lantern defines two ground steps (night, night-raised); the app's
+	// layering needs a third. Dark extends the night ramp one even step
+	// (derived, same deltas); light reuses Lantern's sunk paper tone.
+	{ key: "surface-2", label: "Raised cards", group: "Surfaces", neutral: { dark: "#2A241E", light: "#F2E9D8" } },
 	// Slot KEYS are stable identifiers in live theme rows (the teal ruling);
 	// labels resolve {companion} from Identity at the panel route.
-	{ key: "jay", label: "{companion}'s bubble", group: "Surfaces", neutral: { dark: "#232728", light: "#EEEFEE" } },
-	{ key: "jay-border", label: "{companion}'s bubble border", group: "Surfaces", neutral: { dark: "#313638", light: "#DDDEDC" } },
-	{ key: "bd", label: "Borders", group: "Surfaces", neutral: { dark: "#3C4144", light: "#CDCCC8" } },
+	{ key: "jay", label: "{companion}'s bubble", group: "Surfaces", neutral: { dark: "#1E1A16", light: "#FFFDF8" } },
+	{ key: "jay-border", label: "{companion}'s bubble border", group: "Surfaces", neutral: { dark: "#322A22", light: "#E4D8C3" } },
+	{ key: "bd", label: "Borders", group: "Surfaces", neutral: { dark: "#322A22", light: "#E4D8C3" } },
+	// Informational surfaces — dusk, the air outside the window. Never amber:
+	// amber is only ever something you can press (Lantern's one rule).
+	{ key: "dusk", label: "Info surface", group: "Surfaces", neutral: { dark: "#232E3D", light: "#E7EDF4" } },
+	{ key: "dusk-raised", label: "Info surface — lifted", group: "Surfaces", neutral: { dark: "#2C3949", light: "#F1F5FA" } },
 	// Text
-	{ key: "tx", label: "Text — primary", group: "Text", neutral: { dark: "#F2F1F0", light: "#1B1A19" } },
-	{ key: "tx2", label: "Text — secondary", group: "Text", neutral: { dark: "#C8C7C4", light: "#45443F" } },
-	{ key: "tx3", label: "Text — muted", group: "Text", neutral: { dark: "#9F9D99", light: "#7C7972" } },
+	{ key: "tx", label: "Text — primary", group: "Text", neutral: { dark: "#FBF2E2", light: "#1E1A16" } },
+	{ key: "tx2", label: "Text — secondary", group: "Text", neutral: { dark: "#CBBFAF", light: "#443D35" } },
+	{ key: "tx3", label: "Text — muted", group: "Text", neutral: { dark: "#9A8C7C", light: "#6B6055" } },
+	{ key: "dusk-text", label: "Text on info surface", group: "Text", neutral: { dark: "#C3D2E2", light: "#2B3A4E" } },
 	// Accents
-	{ key: "teal", label: "Primary accent", group: "Accents", neutral: { dark: "#52797C", light: "#4A6F72" } },
-	{ key: "teal-300", label: "Primary accent — light", group: "Accents", neutral: { dark: "#8FB0B2", light: "#52797C" } },
-	{ key: "bronze", label: "Warm accent", group: "Accents", neutral: { dark: "#9C9082", light: "#8A7E6F" } },
-	{ key: "bronze-100", label: "Warm accent — pale", group: "Accents", neutral: { dark: "#D8D0C4", light: "#57503F" } },
-	{ key: "sage", label: "Soft accent", group: "Accents", neutral: { dark: "#97A39C", light: "#6E7B74" } },
-	{ key: "red", label: "Alarm", group: "Accents", neutral: { dark: "#B05252", light: "#A34444" } },
-	{ key: "amber", label: "Warning", group: "Accents", neutral: { dark: "#C99A56", light: "#A87830" } },
+	{ key: "teal", label: "Primary accent", group: "Accents", neutral: { dark: "#EDA94E", light: "#C4692C" } },
+	{ key: "teal-300", label: "Primary accent — light", group: "Accents", neutral: { dark: "#EDA94E", light: "#A0521F" } },
+	{ key: "bronze", label: "Warm accent", group: "Accents", neutral: { dark: "#C4692C", light: "#C4692C" } },
+	{ key: "bronze-100", label: "Warm accent — pale", group: "Accents", neutral: { dark: "#CBBFAF", light: "#6B6055" } },
+	{ key: "sage", label: "Soft accent", group: "Accents", neutral: { dark: "#7FA36B", light: "#4F7343" } },
+	{ key: "red", label: "Alarm", group: "Accents", neutral: { dark: "#C25248", light: "#9C3A32" } },
+	{ key: "amber", label: "Warning", group: "Accents", neutral: { dark: "#D7B44C", light: "#8A6B1E" } },
 	// Accent derivatives — the literals the Step 0 probe surfaced, promoted to
-	// slots so they follow the theme instead of staying welded VDS ink.
-	{ key: "teal-100", label: "Primary tint (avatar text)", group: "Accent derivatives", neutral: { dark: "#C9D8D9", light: "#DCE6E6" } },
-	{ key: "teal-hover", label: "Primary hover", group: "Accent derivatives", neutral: { dark: "#618E91", light: "#3E6163" } },
-	{ key: "teal-ink", label: "Ink on primary", group: "Accent derivatives", neutral: { dark: "#0F1B1C", light: "#FFFFFF" } },
-	{ key: "bronze-ink", label: "Ink on warm accent", group: "Accent derivatives", neutral: { dark: "#1B1712", light: "#FFFFFF" } },
-	{ key: "pure", label: "Pure (knobs, play glyph)", group: "Accent derivatives", neutral: { dark: "#FFFFFF", light: "#FFFFFF" } },
+	// slots so they follow the theme instead of staying welded ink.
+	{ key: "teal-100", label: "Primary tint (avatar text)", group: "Accent derivatives", neutral: { dark: "#12100E", light: "#FFF9EE" } },
+	{ key: "teal-hover", label: "Primary hover", group: "Accent derivatives", neutral: { dark: "#C4692C", light: "#A0521F" } },
+	{ key: "teal-ink", label: "Ink on primary", group: "Accent derivatives", neutral: { dark: "#12100E", light: "#FFF9EE" } },
+	{ key: "bronze-ink", label: "Ink on warm accent", group: "Accent derivatives", neutral: { dark: "#FBF2E2", light: "#FFF9EE" } },
+	{ key: "pure", label: "Pure (knobs, play glyph)", group: "Accent derivatives", neutral: { dark: "#FBF2E2", light: "#FFFFFF" } },
 ];
 
 const COLOR_SLOT_KEYS = new Set(COLOR_SLOTS.map((s) => s.key));

@@ -1,60 +1,67 @@
 /* ============================================================
-   Vale OS — global styles & the NEUTRAL default theme.
+   Vale OS — global styles & LANTERN, the shipped default theme.
 
    Since the Décor circuit (19 Jul 2026) the design system is DATA:
    the active theme lives in decor_theme_versions, edited in the
    Fuse Box, and lands as CSS custom properties in <style id="decor">
    (Worker-injected at serve time, kept live by src/decor.ts). The
    values below are the compiled-in fallback every slot resolves to
-   when no theme is active — a primed wall: warm greys, near-black
-   warm ink, one restrained slate-teal accent that reads as nobody's,
-   system-adjacent type. Deliberately unmemorable, on purpose. This
-   is what the public Haven template ships.
+   when no theme is active — Lantern (8 Aug 2026), Haven's own
+   identity: the ground is night, the light is the interface. Amber
+   is only ever something you can press; anything that merely
+   informs wears dusk. This is what the public Haven template ships.
 
-   Slot names are stable identifiers, not descriptions — a theme may
-   put any colour in --teal, exactly as a Workshop accent named teal
-   already can. The dark values are what the app wears (dark-only
-   since the 30 May mockup); light values ride along in the theme
-   rows for the day the house grows a light switch.
+   Slot names are stable identifiers, not descriptions — the slot
+   named --teal wears lantern amber, exactly as a Workshop accent
+   named teal may hold any colour. The dark values are what the app
+   wears (dark-only since the 30 May mockup); light values ride
+   along for the day the house grows a light switch.
 
    These values must stay in sync with COLOR_SLOTS/FONT_SLOTS in
    backend/src/decor.ts — the engine is the source of truth.
    ============================================================ */
 :root {
-  /* Surfaces */
-  --bg: #141618;          /* app background */
-  --surface: #1D2022;     /* header / input chrome / ambient bar */
-  --surface-2: #272B2D;   /* raised cards / ambient tiles */
-  --jay: #232728;         /* Jay's message bubble — his own surface */
-  --jay-border: #313638;
-  --bd: #3C4144;          /* borders */
+  /* Surfaces — the night is the ground */
+  --bg: #12100E;          /* app background — warm near-black, never pure */
+  --surface: #1E1A16;     /* header / input chrome / ambient bar */
+  --surface-2: #2A241E;   /* raised cards / ambient tiles — the night ramp's
+                             third step (derived; Lantern defines two) */
+  --jay: #1E1A16;         /* the companion's message bubble — his own surface */
+  --jay-border: #322A22;
+  --bd: #322A22;          /* hairlines */
+
+  /* Informational surfaces — dusk, the air outside the window. Anything
+     that merely informs wears dusk; amber is only ever something you can
+     press (Lantern's one rule). */
+  --dusk: #232E3D;
+  --dusk-raised: #2C3949;
+  --dusk-text: #C3D2E2;
 
   /* Accents */
-  --teal: #52797C;        /* primary action — Elle's bubbles, send */
-  --teal-300: #8FB0B2;    /* lighter primary — icons, accents */
-  --bronze: #9C9082;      /* warm accent */
-  --bronze-100: #D8D0C4;  /* pale warm — mood text */
-  --sage: #97A39C;        /* soft accent — recurring / birthdays */
-  --red: #B05252;         /* alarm — blocked projects */
-  --amber: #C99A56;       /* warning — project-doc spines */
+  --teal: #EDA94E;        /* primary action — lantern amber. pressable only */
+  --teal-300: #EDA94E;    /* lighter primary — icons, accents */
+  --bronze: #C4692C;      /* warm accent — ember */
+  --bronze-100: #CBBFAF;  /* pale warm — mood text */
+  --sage: #7FA36B;        /* soft accent — moss. recurring / birthdays */
+  --red: #C25248;         /* alarm — clay */
+  --amber: #D7B44C;       /* warning — brass. status, never a control */
 
   /* Accent derivatives — the once-scattered literals, now slots */
-  --teal-100: #C9D8D9;    /* primary tint — avatar text on primary fill */
-  --teal-hover: #618E91;  /* primary hover (play button) */
-  --teal-ink: #0F1B1C;    /* ink on light-primary fills (chips, send) */
-  --bronze-ink: #1B1712;  /* ink on warm-accent fills (counts) */
-  --pure: #FFFFFF;        /* toggle knobs, play glyph, flash text */
+  --teal-100: #12100E;    /* primary tint — avatar text on primary fill */
+  --teal-hover: #C4692C;  /* primary hover — ember */
+  --teal-ink: #12100E;    /* ink on amber fills (chips, send) */
+  --bronze-ink: #FBF2E2;  /* ink on ember fills (counts) */
+  --pure: #FBF2E2;        /* toggle knobs, play glyph, flash text — wick */
 
   /* Text */
-  --tx: #F2F1F0;          /* primary */
-  --tx2: #C8C7C4;         /* secondary */
-  --tx3: #9F9D99;         /* tertiary / muted */
+  --tx: #FBF2E2;          /* primary — wick */
+  --tx2: #CBBFAF;         /* secondary — wick↔smoke midpoint */
+  --tx3: #9A8C7C;         /* tertiary / muted — smoke */
 
-  /* Type — system-adjacent until themed; themes pick from the curated
-     bundled list (Fraunces, Inter, JetBrains Mono, Atkinson Hyperlegible) */
-  --disp: Georgia, 'Times New Roman', serif;
-  --body: system-ui, -apple-system, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+  /* Type — Lantern's three; themes pick from the curated bundled list */
+  --disp: Newsreader, Georgia, 'Times New Roman', serif;
+  --body: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
   /* Native widgets (date pickers, scrollbars) follow the worn mode. */
   color-scheme: dark;
@@ -64,33 +71,39 @@
    The worn mode is DEVICE dressing, not house config: the drawer's switch
    sets data-decor-mode="light" on <html> and persists per device; absence
    means dark (the house's default since the 30 May mockup). Values below are
-   the NEUTRAL light set — they mirror decor.ts COLOR_SLOTS light neutrals,
+   Lantern's light set — they mirror decor.ts COLOR_SLOTS light values,
    and an active theme's injected light block overrides them slot for slot. */
 [data-decor-mode='light'] {
-  --bg: #FAFAF9;
-  --surface: #FFFFFF;
-  --surface-2: #F0EFED;
-  --jay: #EEEFEE;
-  --jay-border: #DDDEDC;
-  --bd: #CDCCC8;
+  --bg: #FAF4E9;
+  --surface: #FFFDF8;
+  --surface-2: #F2E9D8;
+  --jay: #FFFDF8;
+  --jay-border: #E4D8C3;
+  --bd: #E4D8C3;
 
-  --teal: #4A6F72;
-  --teal-300: #52797C;
-  --bronze: #8A7E6F;
-  --bronze-100: #57503F;
-  --sage: #6E7B74;
-  --red: #A34444;
-  --amber: #A87830;
+  --dusk: #E7EDF4;
+  --dusk-raised: #F1F5FA;
+  --dusk-text: #2B3A4E;
 
-  --teal-100: #DCE6E6;
-  --teal-hover: #3E6163;
-  --teal-ink: #FFFFFF;
-  --bronze-ink: #FFFFFF;
+  /* Ember does the heavy lifting on paper — amber loses its contrast in
+     daylight (Lantern's light block). */
+  --teal: #C4692C;
+  --teal-300: #A0521F;
+  --bronze: #C4692C;
+  --bronze-100: #6B6055;
+  --sage: #4F7343;
+  --red: #9C3A32;
+  --amber: #8A6B1E;
+
+  --teal-100: #FFF9EE;
+  --teal-hover: #A0521F;
+  --teal-ink: #FFF9EE;
+  --bronze-ink: #FFF9EE;
   --pure: #FFFFFF;
 
-  --tx: #1B1A19;
-  --tx2: #45443F;
-  --tx3: #7C7972;
+  --tx: #1E1A16;
+  --tx2: #443D35;
+  --tx3: #6B6055;
 
   color-scheme: light;
 }
@@ -254,14 +267,16 @@ body {
 @keyframes hh-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
 
 /* Stale-honesty ribbon — shared across rooms.
-   A quiet owning-up that the panel isn't live, so frozen last-good never lies. */
+   A quiet owning-up that the panel isn't live, so frozen last-good never
+   lies. Informational, so it wears dusk — never amber (Lantern's rule). */
 .room-stale {
   display: flex; align-items: center; justify-content: center; gap: 6px;
   padding: 6px 12px; margin-bottom: 8px;
-  font-size: 11.5px; color: var(--tx3);
-  background: var(--surface-2); border: 1px solid var(--bd); border-radius: 8px;
+  font-size: 11.5px; color: var(--dusk-text);
+  background: var(--dusk); border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--dusk-text) 28%, transparent);
 }
-.room-stale i { font-size: 14px; color: var(--bronze); }
+.room-stale i { font-size: 14px; color: var(--dusk-text); }
 
 /* ---- Workshop ---- */
 .workshop {
@@ -347,11 +362,12 @@ body {
 }
 
 /* Placeholder panel where the tool body will land in a later slice. */
+/* Informational callout — dusk, never amber: nothing here is pressable. */
 .work-stub {
   flex: 1;
   min-height: 200px;
-  background: var(--surface);
-  border: 1px solid var(--bd);
+  background: var(--dusk);
+  border: 1px solid color-mix(in srgb, var(--dusk-text) 28%, transparent);
   border-radius: 12px;
   padding: 20px;
   display: flex;
@@ -361,9 +377,9 @@ body {
   gap: 10px;
   text-align: center;
 }
-.work-stub__icon { font-size: 26px; color: var(--teal-300); }
-.work-stub__title { font-size: 13px; color: var(--tx2); }
-.work-stub__hint { font-size: 12px; color: var(--tx3); }
+.work-stub__icon { font-size: 26px; color: var(--dusk-text); }
+.work-stub__title { font-size: 13px; color: var(--dusk-text); }
+.work-stub__hint { font-size: 12px; color: color-mix(in srgb, var(--dusk-text) 72%, transparent); }
 
 /* ---- Calendar tool: agenda ----
    Read-only agenda of upcoming events, grouped under Perth-day headers with a
