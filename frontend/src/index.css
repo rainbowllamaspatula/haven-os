@@ -945,7 +945,7 @@ body {
   align-items: flex-end; /* send button stays put while the textarea grows */
   gap: 8px;
   margin: 0 16px 16px;
-  padding: 7px 7px 7px 16px;
+  padding: 7px; /* the attach button now holds the left edge (was 16px text inset) */
   background: var(--surface);
   border: 1px solid var(--bd);
   border-radius: 24px;
@@ -982,6 +982,126 @@ body {
 .composer__send i { font-size: 18px; }
 .composer__send:disabled { opacity: 0.45; cursor: default; }
 .composer__input:disabled { color: var(--tx3); }
+
+/* ---- Inbound photos (Front Room — Inbound Images) ---- */
+/* A photo in the user's bubble: same visual family as .imsg. aspect-ratio
+   (inline, from stored dims) reserves the height before the bytes land. */
+.cphoto {
+  width: 100%;
+  max-width: 320px;
+  border-radius: 10px;
+  display: block;
+  margin-bottom: 6px;
+  background: var(--surface-2);
+  object-fit: cover;
+}
+.cphoto--broken {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--tx3);
+  font-size: 12px;
+  border: 1px dashed var(--bd);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 6px;
+}
+.cphoto--broken i { font-size: 16px; }
+
+/* Composer chips: what's riding the next message. */
+.composer-chips {
+  display: flex;
+  gap: 8px;
+  margin: 0 16px 8px;
+  flex-shrink: 0;
+}
+.composer-chips__notice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 16px 8px;
+  font-size: 12px;
+  color: var(--tx2);
+  flex-shrink: 0;
+}
+.composer-chips__notice i { color: var(--red); font-size: 14px; }
+.pchip {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: 10px;
+  border: 1px solid var(--bd);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.pchip img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.pchip--error { border-color: var(--red); }
+.pchip--error img { opacity: 0.4; }
+.pchip__spin {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--tx);
+  font-size: 18px;
+  background: rgba(0, 0, 0, 0.35);
+  animation: pchip-spin 0.9s linear infinite;
+}
+@keyframes pchip-spin {
+  to { transform: rotate(360deg); }
+}
+.pchip__err {
+  position: absolute;
+  inset: auto 0 0 0;
+  font-size: 8.5px;
+  line-height: 1.2;
+  color: var(--tx);
+  background: rgba(0, 0, 0, 0.6);
+  padding: 2px 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pchip__remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: var(--tx);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+.pchip__remove i { font-size: 12px; }
+
+/* The attach affordance, quiet beside the input. */
+.composer__attach {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--tx3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.composer__attach i { font-size: 18px; }
+.composer__attach:disabled { opacity: 0.45; cursor: default; }
 
 /* ---- Room drawer + scrim ---- */
 .scrim {
@@ -1357,6 +1477,8 @@ body {
      rides the content's right edge. */
   .convo,
   .composer { max-width: 720px; width: 100%; margin-inline: auto; }
+  .composer-chips,
+  .composer-chips__notice { max-width: 720px; width: 100%; margin-inline: auto; }
   .workshop { max-width: 760px; width: 100%; margin-inline: auto; }
   .hearth { max-width: 760px; width: 100%; margin-inline: auto; }
   .gallery { max-width: 760px; width: 100%; margin-inline: auto; }

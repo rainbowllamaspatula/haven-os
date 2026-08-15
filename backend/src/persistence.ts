@@ -22,8 +22,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 // `image` surfaces metadata.image (a generate_image row reference) the same
 // way: the text stays the intent, the client resolves the id against the
 // Gallery for the inline render.
+// `photos` surfaces metadata.photos (inbound photos Elle attached to her own
+// message — Inbound Images brief): message-scoped R2 objects under chat/,
+// never Gallery rows. The text stays the caption — verbatim, may be empty.
+// Width/height are advisory render hints (the bubble reserves aspect-ratio
+// before bytes arrive), never trusted for anything else.
 export type VoiceAttachment = { key: string; chars?: number };
 export type ImageAttachment = { id: string };
+export type PhotoAttachment = { key: string; width?: number; height?: number };
 export type StoredMessage = {
 	id: string;
 	from: string;
@@ -31,6 +37,7 @@ export type StoredMessage = {
 	created_at: string;
 	voice?: VoiceAttachment;
 	image?: ImageAttachment;
+	photos?: PhotoAttachment[];
 };
 
 // Pull a well-formed voice attachment out of a message's jsonb metadata, or
@@ -49,6 +56,28 @@ function imageFromMetadata(metadata: unknown): ImageAttachment | undefined {
 	const image = (metadata as { image?: { id?: unknown } } | null)?.image;
 	if (!image || typeof image.id !== "string" || !image.id) return undefined;
 	return { id: image.id };
+}
+
+// And for inbound photos: keep only well-formed entries (a non-empty string
+// key; numeric dims ride along when sane). A malformed blob degrades to the
+// caption alone — never a crash, never a fabricated attachment.
+function photosFromMetadata(metadata: unknown): PhotoAttachment[] | undefined {
+	const photos = (metadata as { photos?: unknown } | null)?.photos;
+	if (!Array.isArray(photos)) return undefined;
+	const clean = photos.flatMap((p): PhotoAttachment[] => {
+		const key = (p as { key?: unknown } | null)?.key;
+		if (typeof key !== "string" || !key) return [];
+		const width = (p as { width?: unknown }).width;
+		const height = (p as { height?: unknown }).height;
+		return [
+			{
+				key,
+				...(typeof width === "number" && width > 0 ? { width } : {}),
+				...(typeof height === "number" && height > 0 ? { height } : {}),
+			},
+		];
+	});
+	return clean.length ? clean : undefined;
 }
 
 /** Resolve a room name to its id. Throws if the room doesn't exist. */
@@ -137,6 +166,7 @@ export async function loadRecentMessages(
 		.map((m) => {
 			const voice = voiceFromMetadata(m.metadata);
 			const image = imageFromMetadata(m.metadata);
+			const photos = photosFromMetadata(m.metadata);
 			return {
 				id: m.id,
 				from: m.role,
@@ -144,6 +174,7 @@ export async function loadRecentMessages(
 				created_at: m.created_at,
 				...(voice ? { voice } : {}),
 				...(image ? { image } : {}),
+				...(photos ? { photos } : {}),
 			};
 		});
 }

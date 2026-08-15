@@ -87,7 +87,14 @@ type Message = {
   // The text stays Jay's intent; the client resolves the id against the
   // Gallery and renders the picture inline once the pipeline completes.
   image?: { id: string };
+  // Inbound photos Elle attached (metadata.photos): message-scoped chat/ keys
+  // in R2, served through the session-gated photo route. The text is the
+  // caption — may be empty. width/height reserve the bubble's aspect-ratio
+  // before the bytes arrive.
+  photos?: ChatPhotoRef[];
 };
+
+type ChatPhotoRef = { key: string; width?: number; height?: number };
 
 // Which capabilities the install holds (GET /api/readiness) — the rooms'
 // honest empty states key off this. null = not loaded; rooms render normally
@@ -245,6 +252,108 @@ function InlineImage({ imageId, onOpenGallery }: { imageId: string; onOpenGaller
         <i className="ti ti-photo" aria-hidden="true" /> View in Gallery
       </button>
     </div>
+  );
+}
+
+// ── Inbound photos (Front Room — Inbound Images) ────────────────────────────
+// Elle's photos into the thread: attach on the composer, downscale on-device,
+// upload while she's still typing, send the keys with the message. The photos
+// are message attachments, never Gallery objects.
+
+const CHAT_PHOTO_MAX_PER_MESSAGE = 4;
+const CHAT_PHOTO_MAX_EDGE = 2048; // longest edge after the canvas re-encode
+const CHAT_PHOTO_MAX_BYTES = 4 * 1024 * 1024; // post-encode cap — reject louder
+const CHAT_PHOTO_PREVIEW_CACHE_MAX = 24;
+
+// A composer chip: one photo being readied for the next message.
+type PendingPhoto = {
+  id: number;
+  localUrl: string; // object URL of the downscaled blob — the chip + optimistic bubble
+  status: 'uploading' | 'ready' | 'error';
+  error?: string;
+  key?: string; // set once the upload lands
+  width: number;
+  height: number;
+};
+
+// Sent photos keep rendering from their local preview (no refetch flash when
+// the optimistic bubble reconciles to server rows). Keyed by R2 key; bounded,
+// oldest revoked first — beyond the cache the session-gated route serves them.
+const photoPreviewCache = new Map<string, string>();
+function cachePhotoPreview(key: string, url: string) {
+  photoPreviewCache.set(key, url);
+  if (photoPreviewCache.size > CHAT_PHOTO_PREVIEW_CACHE_MAX) {
+    const oldest = photoPreviewCache.keys().next().value as string;
+    const gone = photoPreviewCache.get(oldest);
+    photoPreviewCache.delete(oldest);
+    if (gone) URL.revokeObjectURL(gone);
+  }
+}
+
+// Downscale on-device: canvas re-encode, longest edge ≤ 2048px, webp with a
+// jpeg fallback where webp encoding is unavailable. Throws an honest message
+// when the file can't decode or is still over the cap after encoding.
+async function downscalePhoto(
+  file: File,
+): Promise<{ blob: Blob; width: number; height: number }> {
+  let bitmap: ImageBitmap;
+  try {
+    // from-image honours EXIF orientation — a phone photo must not land sideways.
+    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  } catch {
+    throw new Error("couldn't read that photo");
+  }
+  const scale = Math.min(1, CHAT_PHOTO_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    bitmap.close();
+    throw new Error("couldn't process that photo");
+  }
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+  const encode = (type: string) =>
+    new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, type, 0.85));
+  let blob = await encode('image/webp');
+  if (!blob || blob.type !== 'image/webp') blob = await encode('image/jpeg');
+  if (!blob) throw new Error("couldn't encode that photo");
+  if (blob.size > CHAT_PHOTO_MAX_BYTES) {
+    throw new Error(`still ${(blob.size / 1024 / 1024).toFixed(1)} MB after downscaling — 4 MB is the cap`);
+  }
+  return { blob, width, height };
+}
+
+// One photo in a bubble. aspect-ratio from the stored dims reserves the height
+// before bytes arrive (the ResizeObserver pin covers any residual reflow); a
+// failed fetch shows a quiet broken-photo note, never a spinner forever.
+function ChatPhoto({ photo }: { photo: ChatPhotoRef }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <div className="cphoto cphoto--broken">
+        <i className="ti ti-photo-x" aria-hidden="true" />
+        <span>photo didn't load</span>
+      </div>
+    );
+  }
+  const local = photoPreviewCache.get(photo.key);
+  return (
+    <img
+      className="cphoto"
+      src={local ?? apiUrl(`/chat/photo/${photo.key}`)}
+      alt="photo"
+      loading="lazy"
+      style={
+        photo.width && photo.height
+          ? { aspectRatio: `${photo.width} / ${photo.height}` }
+          : undefined
+      }
+      onError={() => setFailed(true)}
+    />
   );
 }
 
@@ -955,6 +1064,81 @@ function App() {
     el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_HEIGHT)}px`;
   }
 
+  // ── Composer photos (Inbound Images) ──────────────────────────────────────
+  // Chips above the composer: each attached photo downscales on-device then
+  // uploads while Elle is still typing. A failed upload is a chip-level error
+  // — the message stays sendable without it.
+  const [pendingPhotos, setPendingPhotos] = useState<PendingPhoto[]>([]);
+  const [photoNotice, setPhotoNotice] = useState<string | null>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const photoChipId = useRef(0);
+
+  // Transient composer-level note (too many photos, a file that won't decode).
+  function flashPhotoNotice(text: string) {
+    setPhotoNotice(text);
+    setTimeout(() => setPhotoNotice((cur) => (cur === text ? null : cur)), 5000);
+  }
+
+  async function attachPhotos(list: FileList | null) {
+    if (!list?.length) return;
+    const room = CHAT_PHOTO_MAX_PER_MESSAGE - pendingPhotos.length;
+    const files = Array.from(list);
+    if (files.length > room) {
+      flashPhotoNotice(`${CHAT_PHOTO_MAX_PER_MESSAGE} photos per message — the rest didn't attach`);
+    }
+    for (const file of files.slice(0, Math.max(0, room))) {
+      let scaled: { blob: Blob; width: number; height: number };
+      try {
+        scaled = await downscalePhoto(file);
+      } catch (err) {
+        flashPhotoNotice(err instanceof Error ? err.message : "couldn't read that photo");
+        continue;
+      }
+      const id = ++photoChipId.current;
+      const localUrl = URL.createObjectURL(scaled.blob);
+      setPendingPhotos((prev) => [
+        ...prev,
+        { id, localUrl, status: 'uploading', width: scaled.width, height: scaled.height },
+      ]);
+      // One POST per photo: chip-level status, chip-level errors, no batch
+      // failing the lot. Uploads overlap with typing.
+      void (async () => {
+        try {
+          const fd = new FormData();
+          fd.append('photos', scaled.blob, 'photo');
+          fd.append('dims', JSON.stringify([{ width: scaled.width, height: scaled.height }]));
+          const res = await api('/chat/photos', { method: 'POST', body: fd });
+          const data = await res.json();
+          const key = data.ok ? data.photos?.[0]?.key : undefined;
+          if (typeof key !== 'string') throw new Error(data.error ?? 'upload failed');
+          setPendingPhotos((prev) =>
+            prev.map((p) => (p.id === id ? { ...p, status: 'ready', key } : p)),
+          );
+        } catch (err) {
+          setPendingPhotos((prev) =>
+            prev.map((p) =>
+              p.id === id
+                ? {
+                    ...p,
+                    status: 'error',
+                    error: err instanceof Error ? err.message : 'upload failed',
+                  }
+                : p,
+            ),
+          );
+        }
+      })();
+    }
+  }
+
+  function removePendingPhoto(id: number) {
+    setPendingPhotos((prev) => {
+      const gone = prev.find((p) => p.id === id);
+      if (gone) URL.revokeObjectURL(gone.localUrl);
+      return prev.filter((p) => p.id !== id);
+    });
+  }
+
   // The light switch (Décor circuit, Haven-ready): the worn MODE is device
   // dressing — this device's localStorage, never a row. The boot script
   // already applied it before first paint; this state just keeps the drawer
@@ -1534,8 +1718,31 @@ function App() {
 
   async function send() {
     const text = input.trim();
-    // Ignore empty sends, double-sends, and offline sends — no fake replies.
-    if (!text || thinking || !navigator.onLine) return;
+    // The photos riding this message: uploaded chips only. Error chips are
+    // dropped (their honest note already showed); an upload still in flight
+    // blocks the send button below, so none are silently left behind.
+    const readyPhotos = pendingPhotos.filter(
+      (p): p is PendingPhoto & { key: string } => p.status === 'ready' && !!p.key,
+    );
+    // Ignore empty sends (no text AND no photos), double-sends, and offline
+    // sends — no fake replies. Uploading chips also hold the send.
+    if ((!text && !readyPhotos.length) || thinking || !navigator.onLine) return;
+    if (pendingPhotos.some((p) => p.status === 'uploading')) return;
+    const photos: ChatPhotoRef[] = readyPhotos.map(({ key, width, height }) => ({
+      key,
+      width,
+      height,
+    }));
+    // The optimistic bubble (and the reconciled server row after it) renders
+    // from the local preview — no flash while the server copy first loads.
+    for (const p of readyPhotos) cachePhotoPreview(p.key, p.localUrl);
+    setPendingPhotos((prev) => {
+      // Error chips die with the send; their object URLs go with them.
+      for (const p of prev) {
+        if (p.status === 'error') URL.revokeObjectURL(p.localUrl);
+      }
+      return [];
+    });
     // Both bubble ids are captured HERE, synchronously — never inside a state
     // updater. React flushes updaters later, so a Date.now() inside one can land
     // a millisecond after a Date.now() outside it and collide with jayId.
@@ -1545,7 +1752,13 @@ function App() {
     // new message — never the history — and reconcile against what comes back.
     setMessages((prev) => [
       ...prev,
-      { id: elleId, from: 'elle', text, created_at: new Date().toISOString() },
+      {
+        id: elleId,
+        from: 'elle',
+        text,
+        created_at: new Date().toISOString(),
+        ...(photos.length ? { photos } : {}),
+      },
     ]);
     setInput('');
     // Collapse the composer back to a single line for the next message.
@@ -1640,7 +1853,7 @@ function App() {
       const res = await api('/message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, ...(photos.length ? { photos } : {}) }),
       });
       // Pre-stream failures (bad body, history/save errors) still come back as a
       // plain non-OK JSON response — the stream never opened.
@@ -1914,6 +2127,10 @@ function App() {
                         onOpenGallery={() => setActiveRoom('gallery')}
                       />
                     )}
+                    {/* Inbound photos: Elle's pictures above her caption. */}
+                    {item.msg.photos?.map((p) => (
+                      <ChatPhoto key={p.key} photo={p} />
+                    ))}
                     <Markdown remarkPlugins={MD_PLUGINS} components={MD_COMPONENTS}>
                       {item.msg.text}
                     </Markdown>
@@ -1989,9 +2206,66 @@ function App() {
             </div>
           )}
 
+          {/* Photo chips — previews of what's riding the next message, each
+              removable; uploads overlap with typing. An error chip is honest
+              and holds nothing hostage. */}
+          {photoNotice && (
+            <div className="composer-chips__notice" role="status">
+              <i className="ti ti-photo-x" aria-hidden="true" /> {photoNotice}
+            </div>
+          )}
+          {pendingPhotos.length > 0 && (
+            <div className="composer-chips">
+              {pendingPhotos.map((p) => (
+                <div
+                  key={p.id}
+                  className={`pchip ${p.status === 'error' ? 'pchip--error' : ''}`}
+                >
+                  <img src={p.localUrl} alt="" />
+                  {p.status === 'uploading' && (
+                    <i className="ti ti-loader-2 pchip__spin" aria-hidden="true" />
+                  )}
+                  {p.status === 'error' && (
+                    <span className="pchip__err">{p.error ?? 'upload failed'}</span>
+                  )}
+                  <button
+                    className="pchip__remove"
+                    aria-label="Remove photo"
+                    onClick={() => removePendingPhoto(p.id)}
+                  >
+                    <i className="ti ti-x" aria-hidden="true" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Composer — auto-growing textarea. Enter makes a new line; the Send
               button is the only thing that sends. Elle writes in paragraphs. */}
           <div className="composer">
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              hidden
+              onChange={(e) => {
+                void attachPhotos(e.target.files);
+                e.target.value = ''; // re-attaching the same file must fire again
+              }}
+            />
+            <button
+              className="composer__attach"
+              aria-label="Attach photos"
+              onClick={() => photoInputRef.current?.click()}
+              disabled={
+                !online ||
+                (readiness !== null && !readiness.anthropic) ||
+                pendingPhotos.length >= CHAT_PHOTO_MAX_PER_MESSAGE
+              }
+            >
+              <i className="ti ti-paperclip" aria-hidden="true" />
+            </button>
             <textarea
               ref={composerRef}
               className="composer__input"
@@ -2009,7 +2283,12 @@ function App() {
               className="composer__send"
               aria-label="Send"
               onClick={send}
-              disabled={thinking || !online || (readiness !== null && !readiness.anthropic)}
+              disabled={
+                thinking ||
+                !online ||
+                (readiness !== null && !readiness.anthropic) ||
+                pendingPhotos.some((p) => p.status === 'uploading')
+              }
             >
               <i className="ti ti-arrow-up" aria-hidden="true" />
             </button>

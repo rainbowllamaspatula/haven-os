@@ -51,6 +51,7 @@ import {
 	touchConversation,
 	getMessageForVoice,
 	setMessageMetadata,
+	type PhotoAttachment,
 } from "./persistence";
 import { renderVoiceNote, voiceMetadata, audioKey, loadVoiceIdentity } from "./voice";
 import { sessionStatus, sessionCookie, loginPage } from "./auth";
@@ -121,8 +122,10 @@ const CORS = {
 	"Access-Control-Allow-Headers": "Content-Type",
 };
 
-// A message in the shape the front-end stores it.
-type ClientMessage = { from: "elle" | "jay"; text: string };
+// A message in the shape the front-end stores it. `photos` (Inbound Images
+// brief) is Elle-side only: R2 keys under chat/ plus advisory dims; the text
+// stays the caption, verbatim.
+type ClientMessage = { from: "elle" | "jay"; text: string; photos?: PhotoAttachment[] };
 
 // DEV ONLY. Production owns the thread in Supabase (see /api/message). The local
 // sandbox keeps persistence off, so this module-scope array stands in as the
@@ -130,19 +133,154 @@ type ClientMessage = { from: "elle" | "jay"; text: string };
 // gives local chat short-term context. Never read or written in production.
 const devThread: ClientMessage[] = [];
 
+// ── Inbound photos — the canon constants (Inbound Images brief) ─────────────
+// Message-scoped photos live in the GALLERY bucket under chat/ (R2 doctrine:
+// binary → R2, referenced from messages.metadata — but NOT Gallery objects;
+// Spec §7 keeps the Gallery the only room where images are first-class).
+const CHAT_PHOTO_PREFIX = "chat/";
+// Keys are minted server-side (crypto.randomUUID + a whitelisted extension);
+// the same shape is enforced on the way back in — never trust a client key.
+const CHAT_PHOTO_KEY_RX =
+	/^chat\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?:webp|jpg|png)$/;
+// The downscale step guarantees these; the server still enforces them.
+const CHAT_PHOTO_TYPES: Record<string, string> = {
+	"image/webp": "webp",
+	"image/jpeg": "jpg",
+	"image/png": "png",
+};
+const CHAT_PHOTO_MAX_PER_MESSAGE = 4;
+// Post-encode ceiling per photo — reject louder, never silently.
+const CHAT_PHOTO_MAX_BYTES = 4 * 1024 * 1024;
+// The vision window: only this many photos across the WHOLE history ride as
+// real image blocks (newest first); older ones collapse to a placeholder so
+// the thread's per-turn token cost is bounded forever. NOT exported: workerd
+// rejects non-function module exports ("not of type 'function or
+// ExportedHandler'"), so the tests read it through photoVisionWindow() below.
+const CHAT_PHOTO_VISION_WINDOW = 4;
+export function photoVisionWindow(): number {
+	return CHAT_PHOTO_VISION_WINDOW;
+}
+// The collapse text, appended to that message's text — {user} resolves via the
+// identity profile ("Elle" here, the install's own name on Haven). Message
+// text itself is never token-resolved — the caption stays verbatim; this
+// string is assembled OUTSIDE her words and only ever appended after them.
+export const photoPlaceholder = (userName: string) => `[photo ${userName} sent]`;
+
+const photoMediaType = (key: string): string =>
+	key.endsWith(".webp") ? "image/webp" : key.endsWith(".png") ? "image/png" : "image/jpeg";
+
+// A not-yet-hydrated image block: toAnthropicMessages is pure/sync (testable),
+// so it marks WHERE the bytes go and hydratePhotoBlocks fetches them from R2
+// just before the brain call. This type never reaches the wire.
+type PendingImageBlock = { type: "image_pending"; key: string };
+
 // Map the front-end's history to what the Anthropic API expects. Keep only the
 // most recent `limit` turns (the conversation-history buffer, assembly step 5),
 // then make sure the window opens on a user turn — the API requires the first
 // message to be `user`, so any leading assistant lines (like a restored
 // greeting) get dropped.
-export function toAnthropicMessages(history: ClientMessage[], limit: number) {
-	const mapped = history.map((m) => ({
-		role: m.from === "elle" ? ("user" as const) : ("assistant" as const),
-		content: m.text,
-	}));
-	const windowed = mapped.slice(-limit);
-	while (windowed.length && windowed[0].role === "assistant") windowed.shift();
-	return windowed;
+//
+// Photos (Inbound Images brief): a message with photos becomes a content-block
+// array — image blocks (pending until hydration) then the caption as a text
+// block. Walking newest → oldest, only the first CHAT_PHOTO_VISION_WINDOW
+// photos in the windowed history stay image blocks; every older photo
+// collapses to photoPlaceholder(userName) appended to that message's text.
+export function toAnthropicMessages(
+	history: ClientMessage[],
+	limit: number,
+	userName = "the user",
+) {
+	const windowedHistory = history.slice(-limit);
+
+	// Which photo keys ride as image blocks: count newest → oldest across the
+	// window, message photos in their stored order within each message.
+	const keptKeys = new Set<string>();
+	let slots = CHAT_PHOTO_VISION_WINDOW;
+	for (let i = windowedHistory.length - 1; i >= 0 && slots > 0; i--) {
+		const photos = windowedHistory[i].photos ?? [];
+		// Newest message first; within a message the photos read as a flat
+		// attachment sequence, so when one straddles the window boundary its
+		// LATER photos are the more recent — walk them in reverse.
+		for (let j = photos.length - 1; j >= 0 && slots > 0; j--) {
+			keptKeys.add(photos[j].key);
+			slots--;
+		}
+	}
+
+	const mapped = windowedHistory.map((m) => {
+		const role = m.from === "elle" ? ("user" as const) : ("assistant" as const);
+		const photos = m.photos ?? [];
+		if (!photos.length) return { role, content: m.text };
+
+		const kept = photos.filter((p) => keptKeys.has(p.key));
+		const collapsed = photos.length - kept.length;
+		// Collapsed photos append their placeholder AFTER the caption — the
+		// caption itself stays byte-for-byte hers.
+		const placeholders = Array.from({ length: collapsed }, () => photoPlaceholder(userName));
+		const text = [m.text, ...placeholders].filter(Boolean).join("\n");
+
+		if (!kept.length) return { role, content: text };
+		const content: Block[] = [
+			...kept.map((p): PendingImageBlock => ({ type: "image_pending", key: p.key })),
+			// An empty text block is an API error, so a caption-less photo
+			// message ships image blocks alone.
+			...(text ? [{ type: "text", text }] : []),
+		];
+		return { role, content };
+	});
+
+	while (mapped.length && mapped[0].role === "assistant") mapped.shift();
+	return mapped;
+}
+
+// Replace every image_pending marker with a real base64 image block, fetching
+// the bytes from R2. Bytes are stable per key (objects are immutable), so the
+// prompt-cache prefix stays valid across turns. A missing/failed object
+// degrades to the placeholder text — honest, never a crash, never an empty
+// content array.
+async function hydratePhotoBlocks(
+	messages: BrainMessage[],
+	bucket: R2Bucket,
+	userName: string,
+): Promise<BrainMessage[]> {
+	return Promise.all(
+		messages.map(async (m) => {
+			if (typeof m.content === "string") return m;
+			const content = await Promise.all(
+				m.content.map(async (b): Promise<Block> => {
+					if (b.type !== "image_pending") return b;
+					const key = (b as unknown as PendingImageBlock).key;
+					try {
+						const obj = await bucket.get(key);
+						if (!obj) throw new Error("object missing");
+						return {
+							type: "image",
+							source: {
+								type: "base64",
+								media_type: photoMediaType(key),
+								data: bytesToBase64(await obj.arrayBuffer()),
+							},
+						};
+					} catch (err) {
+						console.error(`chat photo hydrate failed for ${key}:`, err);
+						return { type: "text", text: photoPlaceholder(userName) };
+					}
+				}),
+			);
+			return { role: m.role, content };
+		}),
+	);
+}
+
+// ArrayBuffer → base64 without blowing the argument limit on big photos.
+function bytesToBase64(buf: ArrayBuffer): string {
+	const bytes = new Uint8Array(buf);
+	let binary = "";
+	const CHUNK = 0x8000;
+	for (let i = 0; i < bytes.length; i += CHUNK) {
+		binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+	}
+	return btoa(binary);
 }
 
 // A content block in an Anthropic message (text, tool_use, or tool_result).
@@ -1714,7 +1852,7 @@ export default {
 		// Supabase, dev from the module-scope thread), so two devices share one
 		// conversation and a stale client can't overwrite Jay's canon. ─────────
 		if (request.method === "POST" && url.pathname === "/api/message") {
-			let body: { text?: unknown };
+			let body: { text?: unknown; photos?: unknown };
 			try {
 				body = await request.json();
 			} catch {
@@ -1724,7 +1862,66 @@ export default {
 				);
 			}
 			const text = typeof body.text === "string" ? body.text.trim() : "";
-			if (!text) {
+
+			// Inbound photos (Inbound Images brief): optional refs to objects the
+			// upload route already wrote. Validated hard — key shape, count, dims —
+			// and head-checked against R2 below: never trust a client's keys into
+			// the model blindly.
+			let photos: PhotoAttachment[] = [];
+			if (body.photos !== undefined) {
+				if (!Array.isArray(body.photos) || body.photos.length > CHAT_PHOTO_MAX_PER_MESSAGE) {
+					return Response.json(
+						{
+							ok: false,
+							error: `photos must be an array of at most ${CHAT_PHOTO_MAX_PER_MESSAGE}.`,
+						},
+						{ status: 400, headers: CORS },
+					);
+				}
+				for (const p of body.photos) {
+					const key = (p as { key?: unknown } | null)?.key;
+					const width = (p as { width?: unknown } | null)?.width;
+					const height = (p as { height?: unknown } | null)?.height;
+					if (typeof key !== "string" || !CHAT_PHOTO_KEY_RX.test(key)) {
+						return Response.json(
+							{ ok: false, error: "photos[].key is not a chat photo key." },
+							{ status: 400, headers: CORS },
+						);
+					}
+					const dimOk = (v: unknown) =>
+						v === undefined || (typeof v === "number" && Number.isInteger(v) && v > 0 && v <= 10000);
+					if (!dimOk(width) || !dimOk(height)) {
+						return Response.json(
+							{ ok: false, error: "photos[].width/height must be positive integers." },
+							{ status: 400, headers: CORS },
+						);
+					}
+					photos.push({
+						key,
+						...(width !== undefined ? { width: width as number } : {}),
+						...(height !== undefined ? { height: height as number } : {}),
+					});
+				}
+				if (new Set(photos.map((p) => p.key)).size !== photos.length) {
+					return Response.json(
+						{ ok: false, error: "photos[].key values must be unique." },
+						{ status: 400, headers: CORS },
+					);
+				}
+				// The cheap existence check: every key must already be in the bucket.
+				const heads = await Promise.all(photos.map((p) => env.GALLERY.head(p.key)));
+				const missing = heads.findIndex((h) => h === null);
+				if (missing !== -1) {
+					return Response.json(
+						{ ok: false, error: `photo ${photos[missing].key} is not uploaded.` },
+						{ status: 400, headers: CORS },
+					);
+				}
+			}
+
+			// Reject only when there is neither text nor photos — a photo with no
+			// caption sends clean.
+			if (!text && !photos.length) {
 				return Response.json(
 					{ ok: false, error: "No message to reply to." },
 					{ status: 400, headers: CORS },
@@ -1746,11 +1943,30 @@ export default {
 			let system: SystemPrompt;
 			let conversationId = ""; // prod only
 
+			// The collapse-placeholder's name ("[photo Elle sent]" here, the
+			// install's own user on Haven). Loaded only when photos are actually in
+			// play; a load failure degrades to the neutral wording, never a 500.
+			const resolvePhotoUserName = async (historyHasPhotos: boolean) => {
+				if (!historyHasPhotos) return "the user";
+				try {
+					return (await loadIdentityProfile(env, supabase)).user_name;
+				} catch {
+					return "the user";
+				}
+			};
+
 			if (!isProd) {
 				// Dev sandbox: persistence is off, so the module-scope thread stands in
 				// as history — enough to give local chat short-term context.
-				devThread.push({ from: "elle", text });
-				messages = toAnthropicMessages(devThread, RETRIEVAL_CONFIG.historyBufferMessages);
+				devThread.push({ from: "elle", text, ...(photos.length ? { photos } : {}) });
+				const photoUserName = await resolvePhotoUserName(
+					devThread.some((m) => m.photos?.length),
+				);
+				messages = await hydratePhotoBlocks(
+					toAnthropicMessages(devThread, RETRIEVAL_CONFIG.historyBufferMessages, photoUserName),
+					env.GALLERY,
+					photoUserName,
+				);
 				try {
 					system = await buildSystemPrompt(supabase, env, devThread.map((m) => m.text), includeScene);
 				} catch (e) {
@@ -1767,7 +1983,13 @@ export default {
 				// this save failing is a real error she should see.
 				try {
 					conversationId = await getOrCreateActiveConversation(supabase, "front_room");
-					await saveMessage(supabase, conversationId, "elle", text);
+					await saveMessage(
+						supabase,
+						conversationId,
+						"elle",
+						text,
+						photos.length ? { photos } : undefined,
+					);
 				} catch (err) {
 					return Response.json(
 						{ ok: false, error: (err as Error).message },
@@ -1790,9 +2012,18 @@ export default {
 						{ status: 500, headers: CORS },
 					);
 				}
-				messages = toAnthropicMessages(
-					recentWindow.map((m) => ({ from: m.from as "elle" | "jay", text: m.text })),
-					RETRIEVAL_CONFIG.historyBufferMessages,
+				const windowHistory = recentWindow.map((m) => ({
+					from: m.from as "elle" | "jay",
+					text: m.text,
+					...(m.photos ? { photos: m.photos } : {}),
+				}));
+				const photoUserName = await resolvePhotoUserName(
+					windowHistory.some((m) => m.photos?.length),
+				);
+				messages = await hydratePhotoBlocks(
+					toAnthropicMessages(windowHistory, RETRIEVAL_CONFIG.historyBufferMessages, photoUserName),
+					env.GALLERY,
+					photoUserName,
 				);
 				// The whole of what Jay knows before this conversation: static core +
 				// always-on spine + memories retrieved for this exact moment.
@@ -1902,6 +2133,125 @@ export default {
 					{ ok: false, error: (err as Error).message },
 					{ status: 500, headers: CORS },
 				);
+			}
+		}
+
+		// ══ Inbound photos (Front Room — Inbound Images) ═══════════════════════
+		// Elle's photos into the thread. Message-scoped, never Gallery objects
+		// (Spec §7): the bytes live in the GALLERY bucket under chat/, referenced
+		// only from messages.metadata.photos. Both routes sit behind the gate —
+		// no session, no photo, exactly like voice notes.
+
+		// ── POST /api/chat/photos — upload one or more downscaled photos ───────
+		// Session-gated multipart. The client downscales on-device first; the
+		// server still enforces type and size — reject louder, never silently.
+		// dims is an optional JSON array matching the file order: advisory
+		// width/height so the bubble can reserve aspect-ratio before bytes land.
+		if (request.method === "POST" && url.pathname === "/api/chat/photos") {
+			let form: FormData;
+			try {
+				form = await request.formData();
+			} catch {
+				return Response.json(
+					{ ok: false, error: "Body must be multipart form data." },
+					{ status: 400, headers: CORS },
+				);
+			}
+			const files = form.getAll("photos").filter((f): f is File => f instanceof File);
+			if (!files.length) {
+				return Response.json(
+					{ ok: false, error: "No photos attached." },
+					{ status: 400, headers: CORS },
+				);
+			}
+			if (files.length > CHAT_PHOTO_MAX_PER_MESSAGE) {
+				return Response.json(
+					{ ok: false, error: `At most ${CHAT_PHOTO_MAX_PER_MESSAGE} photos per message.` },
+					{ status: 400, headers: CORS },
+				);
+			}
+			let dims: Array<{ width?: number; height?: number }> = [];
+			const dimsRaw = form.get("dims");
+			if (typeof dimsRaw === "string" && dimsRaw) {
+				try {
+					const parsed = JSON.parse(dimsRaw);
+					if (Array.isArray(parsed)) {
+						dims = parsed.map((d) => {
+							const width = (d as { width?: unknown } | null)?.width;
+							const height = (d as { height?: unknown } | null)?.height;
+							const ok = (v: unknown) =>
+								typeof v === "number" && Number.isInteger(v) && v > 0 && v <= 10000;
+							return {
+								...(ok(width) ? { width: width as number } : {}),
+								...(ok(height) ? { height: height as number } : {}),
+							};
+						});
+					}
+				} catch {
+					/* advisory only — bad dims never block an upload */
+				}
+			}
+			for (const file of files) {
+				if (!CHAT_PHOTO_TYPES[file.type]) {
+					return Response.json(
+						{ ok: false, error: `"${file.type || "unknown"}" isn't an accepted photo type.` },
+						{ status: 400, headers: CORS },
+					);
+				}
+				if (file.size > CHAT_PHOTO_MAX_BYTES) {
+					return Response.json(
+						{
+							ok: false,
+							error: `Photo is ${(file.size / 1024 / 1024).toFixed(1)} MB — the cap is ${CHAT_PHOTO_MAX_BYTES / 1024 / 1024} MB.`,
+						},
+						{ status: 400, headers: CORS },
+					);
+				}
+			}
+			try {
+				const uploaded = await Promise.all(
+					files.map(async (file, i) => {
+						const key = `${CHAT_PHOTO_PREFIX}${crypto.randomUUID()}.${CHAT_PHOTO_TYPES[file.type]}`;
+						await env.GALLERY.put(key, await file.arrayBuffer(), {
+							httpMetadata: { contentType: file.type },
+						});
+						return { key, ...(dims[i] ?? {}) };
+					}),
+				);
+				return Response.json({ ok: true, photos: uploaded }, { headers: CORS });
+			} catch (err) {
+				return Response.json(
+					{ ok: false, error: (err as Error).message },
+					{ status: 500, headers: CORS },
+				);
+			}
+		}
+
+		// ── GET /api/chat/photo/{key} — serve one photo from R2 ────────────────
+		// The ONLY way an inbound photo leaves the bucket (no public access). The
+		// path carries the full metadata key (chat/<uuid>.<ext>), mirroring the
+		// gallery file route. Objects are immutable per key, so private caching
+		// is safe — a reload refetches nothing.
+		{
+			const photoMatch = /^\/api\/chat\/photo\/(chat\/[0-9a-f-]{36}\.(?:webp|jpg|png))$/.exec(
+				url.pathname,
+			);
+			if (request.method === "GET" && photoMatch) {
+				const obj = await env.GALLERY.get(photoMatch[1]);
+				if (!obj) {
+					return Response.json(
+						{ ok: false, error: "No such photo." },
+						{ status: 404, headers: CORS },
+					);
+				}
+				return new Response(obj.body, {
+					headers: {
+						...CORS,
+						"Content-Type": obj.httpMetadata?.contentType ?? photoMediaType(photoMatch[1]),
+						"Content-Length": String(obj.size),
+						"Cache-Control": "private, max-age=31536000, immutable",
+					},
+				});
 			}
 		}
 
